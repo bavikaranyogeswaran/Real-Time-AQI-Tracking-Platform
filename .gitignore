@@ -29,6 +29,7 @@ htmlcov/
 *.pkl
 *.joblib
 backend/models/
+!backend/models/.gitkeep
 
 # Node
 node_modules/
