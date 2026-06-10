@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -6,6 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.air_quality import AirQualityReading
+from app.models.location import Location
+
+logger = logging.getLogger(__name__)
 
 OPENWEATHER_URL = "http://api.openweathermap.org/data/2.5/air_pollution"
 
@@ -98,6 +102,25 @@ async def save_reading(
     )
     session.add(reading)
     await session.flush()
+    return reading
+
+
+async def ingest_location(session: AsyncSession, location: Location) -> AirQualityReading | None:
+    """Fetch, validate, and save one reading for the given location. Returns the saved
+    reading, or None if the API call failed or the response failed validation."""
+    try:
+        data = await fetch_air_quality(location.latitude, location.longitude)
+    except httpx.HTTPError as exc:
+        logger.warning("API fetch failed for %s: %s", location.city, exc)
+        return None
+
+    if not validate_reading(data):
+        logger.warning("Invalid reading received for %s — skipping.", location.city)
+        return None
+
+    reading = await save_reading(session, location.location_id, data)
+    await session.commit()
+    logger.info("Ingested AQI %d for %s.", reading.aqi, location.city)
     return reading
 
 
