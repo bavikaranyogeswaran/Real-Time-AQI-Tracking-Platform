@@ -3,6 +3,27 @@ from app.config import settings
 
 OPENWEATHER_URL = "http://api.openweathermap.org/data/2.5/air_pollution"
 
+# US EPA PM2.5 breakpoints: (C_lo, C_hi, AQI_lo, AQI_hi)
+_PM25_BREAKPOINTS = [
+    (0.0,   12.0,  0,   50),
+    (12.1,  35.4,  51,  100),
+    (35.5,  55.4,  101, 150),
+    (55.5,  150.4, 151, 200),
+    (150.5, 250.4, 201, 300),
+    (250.5, 350.4, 301, 400),
+    (350.5, 500.4, 401, 500),
+]
+
+
+def calculate_aqi_from_pm25(pm25_ugm3: float) -> int:
+    """Convert PM2.5 concentration (μg/m³) to US EPA AQI using linear interpolation."""
+    pm25 = round(pm25_ugm3, 1)
+    for c_lo, c_hi, aqi_lo, aqi_hi in _PM25_BREAKPOINTS:
+        if c_lo <= pm25 <= c_hi:
+            aqi = (aqi_hi - aqi_lo) / (c_hi - c_lo) * (pm25 - c_lo) + aqi_lo
+            return round(aqi)
+    return 500 if pm25 > 500.4 else 0
+
 
 async def fetch_air_quality(lat: float, lon: float) -> dict:
     """Call OpenWeather Air Pollution API and return the raw response dict."""
