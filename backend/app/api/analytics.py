@@ -4,11 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.location import Location
-from app.schemas.analytics_schema import CityComparisonOut, TrendOut
+from app.schemas.analytics_schema import CityComparisonOut, GapOut, TrendOut
 from app.services.analytics import (
     get_aqi_distribution,
     get_city_comparison,
     get_daily_averages,
+    get_data_gaps,
     get_hourly_averages,
 )
 
@@ -63,3 +64,16 @@ async def aqi_distribution(
 ):
     location = await _get_location(session, city)
     return await get_aqi_distribution(session, location.location_id)
+
+
+@router.get("/analytics/gaps", response_model=list[GapOut])
+async def data_gaps(
+    city: str = Query(...),
+    lookback_hours: int = Query(default=24, ge=1, le=168),
+    threshold_minutes: int = Query(default=20, ge=5, le=120),
+    session: AsyncSession = Depends(get_db),
+):
+    location = await _get_location(session, city)
+    return await get_data_gaps(
+        session, location.location_id, lookback_hours, threshold_minutes
+    )

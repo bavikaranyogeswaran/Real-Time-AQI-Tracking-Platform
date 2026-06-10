@@ -78,6 +78,68 @@ async def get_aqi_distribution(
     return [{"category": row.category, "count": row.count} for row in result.all()]
 
 
+async def get_data_gaps(
+    session: AsyncSession,
+    location_id: str,
+    lookback_hours: int = 24,
+    threshold_minutes: int = 20,
+) -> list[dict]:
+    """Return time intervals within the lookback window where readings are missing.
+
+    A gap is reported when consecutive readings are more than threshold_minutes
+    apart (default 20 min = 2× the 10-min poll cycle), or when the most recent
+    reading is older than threshold_minutes relative to now.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    now = datetime.now(timezone.utc)
+
+    rows = await session.scalars(
+        select(AirQualityReading.timestamp)
+        .where(
+            AirQualityReading.location_id == location_id,
+            AirQualityReading.timestamp >= cutoff,
+        )
+        .order_by(AirQualityReading.timestamp.asc())
+    )
+    timestamps = list(rows)
+
+    if not timestamps:
+        return [
+            {
+                "gap_start": cutoff,
+                "gap_end": now,
+                "duration_minutes": int((now - cutoff).total_seconds() / 60),
+            }
+        ]
+
+    gaps = []
+
+    for i in range(len(timestamps) - 1):
+        delta = timestamps[i + 1] - timestamps[i]
+        minutes = int(delta.total_seconds() / 60)
+        if minutes > threshold_minutes:
+            gaps.append(
+                {
+                    "gap_start": timestamps[i],
+                    "gap_end": timestamps[i + 1],
+                    "duration_minutes": minutes,
+                }
+            )
+
+    # Trailing gap: last reading to now
+    trailing_minutes = int((now - timestamps[-1]).total_seconds() / 60)
+    if trailing_minutes > threshold_minutes:
+        gaps.append(
+            {
+                "gap_start": timestamps[-1],
+                "gap_end": now,
+                "duration_minutes": trailing_minutes,
+            }
+        )
+
+    return gaps
+
+
 async def get_city_comparison(session: AsyncSession) -> list[dict]:
     latest_subq = (
         select(

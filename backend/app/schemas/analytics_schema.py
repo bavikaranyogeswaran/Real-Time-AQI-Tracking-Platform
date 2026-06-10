@@ -2,6 +2,14 @@ from datetime import date, datetime
 from pydantic import BaseModel
 
 
+class GapOut(BaseModel):
+    gap_start: datetime
+    gap_end: datetime
+    duration_minutes: int
+
+    model_config = {"from_attributes": True}
+
+
 class CityComparisonOut(BaseModel):
     city: str
     country: str
