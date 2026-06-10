@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
+from app.services.ml_service import check_anomaly_for_reading
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,10 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
 
     reading = await save_reading(session, location.location_id, data)
     await session.commit()
+
+    if check_anomaly_for_reading(location.location_id, reading):
+        logger.warning("Anomaly detected — AQI %d for %s.", reading.aqi, location.city)
+
     logger.info("Ingested AQI %d for %s.", reading.aqi, location.city)
     return reading
 
