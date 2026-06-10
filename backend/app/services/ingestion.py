@@ -13,7 +13,7 @@ from app.services.ml_service import check_anomaly_for_reading
 
 logger = logging.getLogger(__name__)
 
-OPENWEATHER_URL = "http://api.openweathermap.org/data/2.5/air_pollution"
+OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/air_pollution"
 
 # US EPA PM2.5 breakpoints: (C_lo, C_hi, AQI_lo, AQI_hi)
 _PM25_BREAKPOINTS = [

@@ -51,20 +51,29 @@ def build_feature_df(readings: list[AirQualityReading]) -> pd.DataFrame:
     df["month"] = df["timestamp"].dt.month
     df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
 
-    # Time-based lag features using merge_asof
+    # Time-based lag features using merge_asof.
+    # First attempt: strict ±15 min tolerance. Any unmatched rows are filled
+    # with the nearest available reading (no tolerance) so early-stage DBs
+    # with less than 24 h of history still produce usable training rows.
     aqi_lookup = df[["timestamp", "aqi"]].copy()
 
     for col_name, delta in _LAG_WINDOWS:
-        # Shift each row's timestamp back by the lag amount to find historical AQI
         query = pd.DataFrame({"timestamp": df["timestamp"] - delta})
-        matched = pd.merge_asof(
+        strict = pd.merge_asof(
             query,
             aqi_lookup.rename(columns={"aqi": col_name}),
             on="timestamp",
             direction="nearest",
             tolerance=_LAG_TOLERANCE,
         )
-        df[col_name] = matched[col_name].values
+        fallback = pd.merge_asof(
+            query,
+            aqi_lookup.rename(columns={"aqi": col_name}),
+            on="timestamp",
+            direction="nearest",
+        )
+        col_values = strict[col_name].where(strict[col_name].notna(), fallback[col_name])
+        df[col_name] = col_values.values
 
     df = df.dropna().reset_index(drop=True)
     return df
