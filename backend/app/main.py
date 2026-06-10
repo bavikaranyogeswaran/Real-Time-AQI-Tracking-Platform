@@ -1,19 +1,52 @@
 import logging
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from app.api import alerts, analytics, aqi, locations
 from app.config import settings
+from app.database import AsyncSessionLocal
+from app.models.alert_rule import AlertRule
 from pipeline.scheduler import start_scheduler, scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+_DEFAULT_RULES = [
+    {"alert_type": "unhealthy",       "threshold_value": 150},
+    {"alert_type": "very_unhealthy",  "threshold_value": 200},
+    {"alert_type": "hazardous",       "threshold_value": 300},
+]
+
+
+async def _seed_default_alert_rules() -> None:
+    async with AsyncSessionLocal() as session:
+        for rule_def in _DEFAULT_RULES:
+            exists = await session.scalar(
+                select(AlertRule).where(
+                    AlertRule.alert_type == rule_def["alert_type"],
+                    AlertRule.threshold_value == rule_def["threshold_value"],
+                    AlertRule.location_id.is_(None),
+                )
+            )
+            if not exists:
+                session.add(AlertRule(
+                    rule_id=str(uuid.uuid4()),
+                    location_id=None,
+                    alert_type=rule_def["alert_type"],
+                    threshold_value=rule_def["threshold_value"],
+                    is_active=True,
+                ))
+                logger.info("Seeded default alert rule: %s > %d", rule_def["alert_type"], rule_def["threshold_value"])
+        await session.commit()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await _seed_default_alert_rules()
     start_scheduler()
     logger.info("Application started.")
     yield
