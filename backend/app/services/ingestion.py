@@ -184,10 +184,19 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
         if alert:
             await send_email_notification(alert)
 
-    await session.commit()
-
     if check_anomaly_for_reading(location.location_id, reading):
         logger.warning("Anomaly detected — AQI %d for %s.", reading.aqi, location.city)
+        anomaly_alert = await create_alert(
+            session,
+            location_id=location.location_id,
+            alert_type="anomaly_spike",
+            threshold_value=0,
+            actual_aqi=reading.aqi,
+        )
+        if anomaly_alert:
+            await send_email_notification(anomaly_alert)
+
+    await session.commit()
 
     logger.info("Ingested AQI %d for %s.", reading.aqi, location.city)
     return reading
