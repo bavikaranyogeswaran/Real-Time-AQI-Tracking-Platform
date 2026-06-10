@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -9,6 +8,7 @@ from app.database import get_db
 from app.models.alert import Alert
 from app.models.alert_rule import AlertRule
 from app.schemas.alert_schema import AlertOut, AlertRuleIn
+from app.services.alert_engine import resolve_alert as engine_resolve_alert
 
 router = APIRouter()
 
@@ -52,13 +52,9 @@ async def resolve_alert(
     alert_id: str,
     session: AsyncSession = Depends(get_db),
 ):
-    result = await session.execute(
-        select(Alert).where(Alert.alert_id == alert_id)
-    )
-    alert = result.scalars().first()
+    alert = await engine_resolve_alert(session, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
-    alert.status = "resolved"
     await session.commit()
     await session.refresh(alert)
     return alert
