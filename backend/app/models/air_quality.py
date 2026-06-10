@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Index
+from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -22,4 +22,5 @@ class AirQualityReading(Base):
 
     __table_args__ = (
         Index("ix_air_quality_location_timestamp", "location_id", "timestamp"),
+        UniqueConstraint("location_id", "timestamp", name="uq_location_timestamp"),
     )

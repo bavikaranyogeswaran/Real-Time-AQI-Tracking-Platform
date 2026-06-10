@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -80,12 +81,27 @@ def validate_reading(data: dict) -> bool:
 async def save_reading(
     session: AsyncSession, location_id: str, data: dict
 ) -> AirQualityReading:
-    """Parse a validated API response and persist a new AirQualityReading row."""
+    """Parse a validated API response and persist a new AirQualityReading row.
+
+    Returns the existing row unchanged if one already exists for this
+    (location_id, timestamp) pair — prevents duplicate inserts when the
+    scheduler fires more than once within the same API polling window.
+    """
     entry = data["list"][0]
     components = entry["components"]
     pm25 = components.get("pm2_5", 0.0)
     aqi = calculate_aqi_from_pm25(pm25)
     timestamp = datetime.fromtimestamp(entry["dt"], tz=timezone.utc)
+
+    existing = await session.scalar(
+        select(AirQualityReading).where(
+            AirQualityReading.location_id == location_id,
+            AirQualityReading.timestamp == timestamp,
+        )
+    )
+    if existing:
+        logger.debug("Duplicate reading for location %s at %s — skipping insert.", location_id, timestamp)
+        return existing
 
     reading = AirQualityReading(
         reading_id=str(uuid.uuid4()),
