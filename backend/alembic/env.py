@@ -15,6 +15,7 @@ from app.models.location import Location  # noqa: F401
 from app.models.air_quality import AirQualityReading  # noqa: F401
 from app.models.prediction import AQIPrediction  # noqa: F401
 from app.models.alert import Alert  # noqa: F401
+from app.models.alert_rule import AlertRule  # noqa: F401
 
 config = context.config
 
