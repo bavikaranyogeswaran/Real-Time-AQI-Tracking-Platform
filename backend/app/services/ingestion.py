@@ -1,5 +1,11 @@
+import uuid
+from datetime import datetime, timezone
+
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
+from app.models.air_quality import AirQualityReading
 
 OPENWEATHER_URL = "http://api.openweathermap.org/data/2.5/air_pollution"
 
@@ -65,6 +71,34 @@ def validate_reading(data: dict) -> bool:
         return True
     except (KeyError, IndexError, TypeError):
         return False
+
+
+async def save_reading(
+    session: AsyncSession, location_id: str, data: dict
+) -> AirQualityReading:
+    """Parse a validated API response and persist a new AirQualityReading row."""
+    entry = data["list"][0]
+    components = entry["components"]
+    pm25 = components.get("pm2_5", 0.0)
+    aqi = calculate_aqi_from_pm25(pm25)
+    timestamp = datetime.fromtimestamp(entry["dt"], tz=timezone.utc)
+
+    reading = AirQualityReading(
+        reading_id=str(uuid.uuid4()),
+        location_id=location_id,
+        timestamp=timestamp,
+        aqi=aqi,
+        pm25=pm25,
+        pm10=components.get("pm10"),
+        co=components.get("co"),
+        no2=components.get("no2"),
+        so2=components.get("so2"),
+        o3=components.get("o3"),
+        data_source="openweather",
+    )
+    session.add(reading)
+    await session.flush()
+    return reading
 
 
 async def fetch_air_quality(lat: float, lon: float) -> dict:
