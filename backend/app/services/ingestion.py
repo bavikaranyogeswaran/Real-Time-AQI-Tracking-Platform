@@ -62,6 +62,8 @@ def validate_reading(data: dict) -> bool:
             return False
         if pm25 < 0:
             return False
+        if pm25 > 500.4:  # beyond top EPA breakpoint — treat as sensor error
+            return False
 
         aqi = calculate_aqi_from_pm25(pm25)
         if not (0 <= aqi <= 999):
@@ -121,6 +123,33 @@ async def save_reading(
     return reading
 
 
+async def is_outlier(session: AsyncSession, location_id: str, aqi: int) -> bool:
+    """Return True if aqi is a statistical spike relative to recent history.
+
+    Uses a 3-sigma z-score over the last 10 readings. Requires at least 3 prior
+    readings; skips the check (returns False) when history is too thin.
+    When all historical readings are identical (std=0), flags any deviation > 100
+    AQI units as a spike.
+    """
+    rows = await session.scalars(
+        select(AirQualityReading.aqi)
+        .where(AirQualityReading.location_id == location_id)
+        .order_by(AirQualityReading.timestamp.desc())
+        .limit(10)
+    )
+    recent = list(rows)
+    if len(recent) < 3:
+        return False
+
+    mean = sum(recent) / len(recent)
+    std = (sum((x - mean) ** 2 for x in recent) / len(recent)) ** 0.5
+
+    if std == 0:
+        return abs(aqi - mean) > 100
+
+    return abs(aqi - mean) / std > 3.0
+
+
 async def ingest_location(session: AsyncSession, location: Location) -> AirQualityReading | None:
     """Fetch, validate, and save one reading for the given location. Returns the saved
     reading, or None if the API call failed or the response failed validation."""
@@ -132,6 +161,11 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
 
     if not validate_reading(data):
         logger.warning("Invalid reading received for %s — skipping.", location.city)
+        return None
+
+    aqi = calculate_aqi_from_pm25(data["list"][0]["components"].get("pm2_5", 0.0))
+    if await is_outlier(session, location.location_id, aqi):
+        logger.warning("Outlier reading (AQI %d) for %s — skipping.", aqi, location.city)
         return None
 
     reading = await save_reading(session, location.location_id, data)
