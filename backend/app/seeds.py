@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from sqlalchemy import select
+from sqlalchemy import func, select
 from app.database import AsyncSessionLocal
 from app.models.location import Location
 
@@ -25,7 +25,7 @@ async def seed():
         inserted = 0
         for data in CITIES:
             result = await session.execute(
-                select(Location).where(Location.city == data["city"])
+                select(Location).where(func.lower(Location.city) == data["city"].lower())
             )
             if result.scalar_one_or_none() is None:
                 session.add(Location(
