@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.models.location import Location
 from app.services.ingestion import ingest_location
+from app.services.ml_service import run_forecast_for_location
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,19 @@ async def ingest_all_locations() -> None:
 
 
 async def run_hourly_forecast() -> None:
-    """Run AQI forecast model for all locations. Wired in Phase 5."""
-    logger.info("Hourly forecast job triggered — ML service not yet wired.")
+    """Run AQI forecast model for all locations."""
+    async with AsyncSessionLocal() as session:
+        locations = (await session.execute(select(Location))).scalars().all()
+
+    total = 0
+    for location in locations:
+        try:
+            async with AsyncSessionLocal() as session:
+                total += await run_forecast_for_location(session, location)
+        except Exception as exc:
+            logger.error("Forecast failed for %s: %s", location.city, exc)
+
+    logger.info("Hourly forecast complete — %d prediction rows inserted.", total)
 
 
 async def retrain_models_daily() -> None:
