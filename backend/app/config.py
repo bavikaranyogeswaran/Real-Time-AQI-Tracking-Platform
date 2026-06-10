@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     postgres_db: str = "aqi_db"
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
     alert_email_from: str = ""
     alert_email_to: str = ""
     cors_origins: list[str] = ["http://localhost:5173"]

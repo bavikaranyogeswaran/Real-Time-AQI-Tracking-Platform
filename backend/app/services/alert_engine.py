@@ -1,10 +1,14 @@
+import asyncio
 import logging
+import smtplib
 import uuid
 from datetime import datetime, timedelta, timezone
+from email.mime.text import MIMEText
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.alert import Alert
 from app.models.alert_rule import AlertRule
 
@@ -86,3 +90,48 @@ async def resolve_alert(session: AsyncSession, alert_id: str) -> Alert | None:
     alert.status = "resolved"
     await session.flush()
     return alert
+
+
+def _send_email_sync(alert: Alert) -> None:
+    recipients = [r.strip() for r in settings.alert_email_to.split(",") if r.strip()]
+
+    subject = f"[AQI Alert] {alert.alert_type.replace('_', ' ').title()} — AQI {alert.actual_aqi}"
+    body = (
+        f"An air quality alert has been triggered.\n\n"
+        f"  Alert type   : {alert.alert_type}\n"
+        f"  Actual AQI   : {alert.actual_aqi}\n"
+        f"  Threshold    : {alert.threshold_value}\n"
+        f"  Location ID  : {alert.location_id}\n"
+        f"  Time (UTC)   : {alert.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"Log in to the AQI dashboard to review and resolve this alert."
+    )
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = settings.alert_email_from
+    msg["To"] = ", ".join(recipients)
+
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
+        if settings.smtp_username and settings.smtp_password:
+            smtp.login(settings.smtp_username, settings.smtp_password)
+        smtp.sendmail(settings.alert_email_from, recipients, msg.as_string())
+    logger.info("Alert email sent to %s for alert %s.", settings.alert_email_to, alert.alert_id)
+
+
+async def send_email_notification(alert: Alert) -> None:
+    """Send an alert email without blocking the event loop.
+
+    Silently logs and returns on any SMTP or config error so ingestion
+    is never blocked by email delivery failures.
+    """
+    if not settings.alert_email_from or not settings.alert_email_to:
+        logger.debug("Email notification skipped — ALERT_EMAIL_FROM/TO not configured.")
+        return
+
+    try:
+        await asyncio.to_thread(_send_email_sync, alert)
+    except Exception as exc:
+        logger.warning("Failed to send alert email (alert %s): %s", alert.alert_id, exc)
