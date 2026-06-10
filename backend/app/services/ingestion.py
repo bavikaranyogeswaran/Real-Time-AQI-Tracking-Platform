@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
+from app.services.alert_engine import check_threshold_rules, create_alert, send_email_notification
 from app.services.ml_service import check_anomaly_for_reading
 
 logger = logging.getLogger(__name__)
@@ -170,6 +171,19 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
         return None
 
     reading = await save_reading(session, location.location_id, data)
+
+    triggered_rules = await check_threshold_rules(session, location.location_id, reading.aqi)
+    for rule in triggered_rules:
+        alert = await create_alert(
+            session,
+            location_id=location.location_id,
+            alert_type=rule.alert_type,
+            threshold_value=rule.threshold_value,
+            actual_aqi=reading.aqi,
+        )
+        if alert:
+            await send_email_notification(alert)
+
     await session.commit()
 
     if check_anomaly_for_reading(location.location_id, reading):
