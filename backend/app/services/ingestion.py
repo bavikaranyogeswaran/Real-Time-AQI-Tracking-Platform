@@ -40,6 +40,33 @@ def get_aqi_category(aqi: int) -> str:
     return "Hazardous"
 
 
+def validate_reading(data: dict) -> bool:
+    """Return True if the API response has the required fields and valid values."""
+    try:
+        entry = data["list"][0]
+        components = entry["components"]
+        pm25 = components.get("pm2_5")
+
+        if pm25 is None:
+            return False
+        if pm25 < 0:
+            return False
+
+        aqi = calculate_aqi_from_pm25(pm25)
+        if not (0 <= aqi <= 999):
+            return False
+
+        pollutants = ["pm10", "co", "no2", "so2", "o3"]
+        for key in pollutants:
+            val = components.get(key)
+            if val is not None and val < 0:
+                return False
+
+        return True
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
 async def fetch_air_quality(lat: float, lon: float) -> dict:
     """Call OpenWeather Air Pollution API and return the raw response dict."""
     params = {"lat": lat, "lon": lon, "appid": settings.openweather_api_key}
