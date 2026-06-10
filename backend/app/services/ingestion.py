@@ -25,6 +25,21 @@ def calculate_aqi_from_pm25(pm25_ugm3: float) -> int:
     return 500 if pm25 > 500.4 else 0
 
 
+def get_aqi_category(aqi: int) -> str:
+    """Map an AQI value to its US EPA health category label."""
+    if aqi <= 50:
+        return "Good"
+    if aqi <= 100:
+        return "Moderate"
+    if aqi <= 150:
+        return "Unhealthy for Sensitive Groups"
+    if aqi <= 200:
+        return "Unhealthy"
+    if aqi <= 300:
+        return "Very Unhealthy"
+    return "Hazardous"
+
+
 async def fetch_air_quality(lat: float, lon: float) -> dict:
     """Call OpenWeather Air Pollution API and return the raw response dict."""
     params = {"lat": lat, "lon": lon, "appid": settings.openweather_api_key}
