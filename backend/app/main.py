@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import alerts, analytics, aqi, locations
 from pipeline.scheduler import start_scheduler, scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(locations.router, prefix="/api", tags=["Locations"])
+app.include_router(aqi.router, prefix="/api", tags=["AQI"])
+app.include_router(alerts.router, prefix="/api", tags=["Alerts"])
+app.include_router(analytics.router, prefix="/api", tags=["Analytics"])
 
 
 @app.get("/health", tags=["Health"])
