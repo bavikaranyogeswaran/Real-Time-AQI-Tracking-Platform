@@ -1,10 +1,12 @@
 import logging
+import sys
 import uuid
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.api import alerts, analytics, aqi, locations
 from app.config import settings
@@ -54,7 +56,15 @@ async def _seed_default_alert_rules() -> None:
 async def lifespan(app: FastAPI):
     await _seed_default_alert_rules()
     start_scheduler()
-    logger.info("Application started.")
+    db_host = urlparse(settings.database_url).hostname or "unknown"
+    job_names = ",".join(j.id for j in scheduler.get_jobs())
+    logger.info(
+        "AQI Platform v%s started | python=%s | db_host=%s | jobs=[%s]",
+        app.version,
+        sys.version.split()[0],
+        db_host,
+        job_names,
+    )
     yield
     scheduler.shutdown(wait=False)
     logger.info("Application shutdown — scheduler stopped.")
@@ -82,6 +92,34 @@ app.include_router(alerts.router, prefix="/api", tags=["Alerts"])
 app.include_router(analytics.router, prefix="/api", tags=["Analytics"])
 
 
+@app.get("/live", tags=["Health"])
+async def liveness():
+    """Liveness probe — 200 as long as the process is alive."""
+    return {"status": "alive"}
+
+
+@app.get("/ready", tags=["Health"])
+async def readiness():
+    """Readiness probe — 503 until the database is reachable."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database unreachable: {exc}") from exc
+    return {"status": "ready"}
+
+
 @app.get("/health", tags=["Health"])
-async def health_check():
-    return {"status": "ok", "message": "AQI Platform is running"}
+async def health():
+    """Deep health check — DB ping + scheduler job count."""
+    db_status = "ok"
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "error"
+    return {
+        "status": "ok",
+        "db": db_status,
+        "scheduler_jobs": len(scheduler.get_jobs()),
+    }
