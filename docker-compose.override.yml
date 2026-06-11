@@ -17,3 +17,8 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
