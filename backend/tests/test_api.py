@@ -36,6 +36,8 @@ from app.models.air_quality import AirQualityReading  # noqa: E402
 from app.models.alert import Alert  # noqa: E402
 from app.models.location import Location  # noqa: E402
 
+pytestmark = pytest.mark.asyncio(loop_scope="session")
+
 # ---------------------------------------------------------------------------
 # Test app — same routers as production but no scheduler or seed lifespan.
 # ---------------------------------------------------------------------------
@@ -79,6 +81,7 @@ async def test_data(engine):
             longitude=4.56,
             source="test",
         ))
+        await session.flush()  # ensure location row exists before FK-referencing inserts
         for i in range(5):
             session.add(AirQualityReading(
                 reading_id=str(uuid.uuid4()),
