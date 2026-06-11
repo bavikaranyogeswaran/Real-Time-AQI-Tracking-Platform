@@ -16,15 +16,22 @@ def configure_logging(log_format: str = "console") -> None:
         else structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty())
     )
 
+    # Applied to foreign (stdlib) log records before the main processors.
+    # _record is still in event_dict here, so add_logger_name can read record.name.
+    pre_chain = [
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+    ]
+
     formatter = structlog.stdlib.ProcessorFormatter(
+        # remove_processors_meta strips internal keys; renderer must be last.
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.contextvars.merge_contextvars,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
             renderer,
         ],
+        foreign_pre_chain=pre_chain,
     )
 
     handler = logging.StreamHandler(sys.stdout)
@@ -35,13 +42,10 @@ def configure_logging(log_format: str = "console") -> None:
     root.addHandler(handler)
     root.setLevel(logging.INFO)
 
-    # Configure structlog for any future native structlog loggers
+    # Configure native structlog loggers to feed into the same formatter.
     structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
+        processors=pre_chain
+        + [
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),
