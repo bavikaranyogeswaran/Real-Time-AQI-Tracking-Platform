@@ -4,17 +4,22 @@ import uuid
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
+import structlog
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import select, text
 
 from app.api import alerts, analytics, aqi, locations
 from app.config import settings
 from app.database import AsyncSessionLocal
+from app.logging_config import configure_logging
+from app.metrics import http_requests_total
 from app.models.alert_rule import AlertRule
 from pipeline.scheduler import scheduler, start_scheduler
 
-logging.basicConfig(level=logging.INFO)
+configure_logging(settings.log_format)
 logger = logging.getLogger(__name__)
 
 _DEFAULT_RULES = [
@@ -86,10 +91,33 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def observability_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+
+    response = await call_next(request)
+
+    http_requests_total.labels(
+        method=request.method,
+        path=request.url.path,
+        status_code=str(response.status_code),
+    ).inc()
+
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 app.include_router(locations.router, prefix="/api", tags=["Locations"])
 app.include_router(aqi.router, prefix="/api", tags=["AQI"])
 app.include_router(alerts.router, prefix="/api", tags=["Alerts"])
 app.include_router(analytics.router, prefix="/api", tags=["Analytics"])
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/live", tags=["Health"])

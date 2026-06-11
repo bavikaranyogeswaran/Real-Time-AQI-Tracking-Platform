@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     alert_email_from: str = ""
     alert_email_to: str = ""
     cors_origins: list[str] = ["http://localhost:5173"]
+    log_format: str = "console"  # set to "json" in production
 
 
 settings = Settings()

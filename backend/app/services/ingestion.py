@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.metrics import aqi_ingest_duration_seconds, aqi_ingest_total
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
 from app.services.alert_engine import check_threshold_rules, create_alert, send_email_notification
@@ -155,19 +157,24 @@ async def is_outlier(session: AsyncSession, location_id: str, aqi: int) -> bool:
 async def ingest_location(session: AsyncSession, location: Location) -> AirQualityReading | None:
     """Fetch, validate, and save one reading for the given location. Returns the saved
     reading, or None if the API call failed or the response failed validation."""
+    t0 = time.perf_counter()
+
     try:
         data = await fetch_air_quality(location.latitude, location.longitude)
     except httpx.HTTPError as exc:
         logger.warning("API fetch failed for %s: %s", location.city, exc)
+        aqi_ingest_total.labels(city=location.city, status="error").inc()
         return None
 
     if not validate_reading(data):
         logger.warning("Invalid reading received for %s — skipping.", location.city)
+        aqi_ingest_total.labels(city=location.city, status="skipped").inc()
         return None
 
     aqi = calculate_aqi_from_pm25(data["list"][0]["components"].get("pm2_5", 0.0))
     if await is_outlier(session, location.location_id, aqi):
         logger.warning("Outlier reading (AQI %d) for %s — skipping.", aqi, location.city)
+        aqi_ingest_total.labels(city=location.city, status="skipped").inc()
         return None
 
     reading = await save_reading(session, location.location_id, data)
@@ -198,6 +205,8 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
 
     await session.commit()
 
+    aqi_ingest_total.labels(city=location.city, status="success").inc()
+    aqi_ingest_duration_seconds.observe(time.perf_counter() - t0)
     logger.info("Ingested AQI %d for %s.", reading.aqi, location.city)
     return reading
 

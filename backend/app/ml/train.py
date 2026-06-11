@@ -5,6 +5,7 @@ Usage:
 """
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -18,6 +19,8 @@ from app.ml.forecasting import train_model
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
 
+logger = logging.getLogger(__name__)
+
 _LOOKBACK_DAYS = 30
 
 
@@ -27,12 +30,9 @@ async def train_all() -> None:
             (await session.execute(select(Location).order_by(Location.city))).scalars().all()
         )
 
-        print(
-            f"\nTraining models for {len(locations)} locations — lookback {_LOOKBACK_DAYS} days\n"
+        logger.info(
+            "Training models for %d locations — lookback %d days", len(locations), _LOOKBACK_DAYS
         )
-        print(f"{'City':<20} {'Readings':>8}  {'Forecast':>8}  {'Anomaly':>8}  Status")
-        print("-" * 72)
-
         cutoff = datetime.now(UTC) - timedelta(days=_LOOKBACK_DAYS)
 
         for loc in locations:
@@ -52,16 +52,16 @@ async def train_all() -> None:
             )
 
             if len(readings) < 10:
-                print(
-                    f"{loc.city:<20} {len(readings):>8}  {'—':>8}  {'—':>8}  skipped (too few readings)"
-                )
+                logger.info("Skipped %s — too few readings (%d)", loc.city, len(readings))
                 continue
 
             df = build_feature_df(readings)
 
             if df.empty or len(df) < 5:
-                print(
-                    f"{loc.city:<20} {len(readings):>8}  {'—':>8}  {'—':>8}  skipped (insufficient features after lag fill)"
+                logger.info(
+                    "Skipped %s — insufficient features after lag fill (df=%d rows)",
+                    loc.city,
+                    len(df),
                 )
                 continue
 
@@ -77,9 +77,11 @@ async def train_all() -> None:
             except Exception as exc:
                 a_path = f"ERR: {exc}"
 
-            print(f"{loc.city:<20} {len(df):>8}  {f_path:>8}  {a_path:>8}  ok")
+            logger.info(
+                "Trained %s — forecast=%s anomaly=%s rows=%d", loc.city, f_path, a_path, len(df)
+            )
 
-        print("\nDone.")
+        logger.info("Training complete.")
 
 
 if __name__ == "__main__":
