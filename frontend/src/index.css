@@ -4,3 +4,103 @@ html, body, #root {
   height: 100%;
   margin: 0;
 }
+
+:root {
+  /* AQI color scale */
+  --aqi-good:           #22c55e;
+  --aqi-moderate:       #eab308;
+  --aqi-sensitive:      #f97316;
+  --aqi-unhealthy:      #ef4444;
+  --aqi-very-unhealthy: #a855f7;
+  --aqi-hazardous:      #7f1d1d;
+
+  /* Surfaces */
+  --surface-bg:     #f9fafb;
+  --surface-card:   #ffffff;
+  --surface-border: #e5e7eb;
+  --surface-muted:  #f3f4f6;
+
+  /* Text */
+  --text-primary:   #111827;
+  --text-secondary: #6b7280;
+  --text-muted:     #9ca3af;
+
+  /* Accent */
+  --accent:    #2563eb;
+  --accent-bg: #eff6ff;
+
+  /* Skeleton */
+  --skeleton-base:  #f3f4f6;
+  --skeleton-shine: #e9eaec;
+}
+
+/* Dark mode — follows system preference unless overridden */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface-bg:     #0f172a;
+    --surface-card:   #1e293b;
+    --surface-border: #334155;
+    --surface-muted:  #1e293b;
+    --text-primary:   #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted:     #64748b;
+    --accent-bg:      #1e3a5f;
+    --skeleton-base:  #1e293b;
+    --skeleton-shine: #334155;
+  }
+}
+
+/* Explicit dark override */
+:root[data-theme="dark"] {
+  --surface-bg:     #0f172a;
+  --surface-card:   #1e293b;
+  --surface-border: #334155;
+  --surface-muted:  #1e293b;
+  --text-primary:   #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted:     #64748b;
+  --accent-bg:      #1e3a5f;
+  --skeleton-base:  #1e293b;
+  --skeleton-shine: #334155;
+}
+
+@keyframes shimmer {
+  0%   { background-position: -800px 0; }
+  100% { background-position:  800px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-shine) 50%, var(--skeleton-base) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+@keyframes aqi-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.35; }
+  50%       { transform: scale(2.3); opacity: 0; }
+}
+.aqi-pulse-ring {
+  animation: aqi-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  transform-origin: center;
+}
+
+/* Page transition */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: page-enter 0.18s ease-out both;
+}
+
+/* Leaflet tooltip reset for custom aqi tooltips */
+.leaflet-tooltip.aqi-tooltip {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.leaflet-tooltip.aqi-tooltip::before {
+  display: none !important;
+}

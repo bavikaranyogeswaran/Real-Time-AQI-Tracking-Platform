@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import ForecastChart from '../components/ForecastChart'
+import { ChartSkeleton } from '../components/LoadingSkeleton'
 import {
   getLocations, getHistory, getForecast,
   type Location, type HistoryAQI, type Forecast as ForecastData,
@@ -43,7 +44,7 @@ export default function Forecast() {
       </select>
 
       {loading ? (
-        <p className="text-gray-400 text-sm">Loading…</p>
+        <ChartSkeleton />
       ) : (
         <>
           {forecast.length === 0 && !loading && (

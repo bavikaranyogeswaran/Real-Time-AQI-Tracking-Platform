@@ -26,8 +26,8 @@ export default function ForecastChart({ history, forecast }: Props) {
   ]
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-6">
-      <p className="text-sm font-medium text-gray-600 mb-4">AQI forecast — next 24 hours</p>
+    <div className="bg-[var(--surface-card)] rounded-xl border border-[var(--surface-border)] p-6">
+      <p className="text-sm font-medium text-[var(--text-secondary)] mb-4">AQI forecast — next 24 hours</p>
       <ResponsiveContainer width="100%" height={300}>
         <ComposedChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />

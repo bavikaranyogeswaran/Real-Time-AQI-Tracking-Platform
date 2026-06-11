@@ -28,15 +28,21 @@ export default function PollutantChart({ pollutants }: Props) {
   }))
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-6">
-      <p className="text-sm font-medium text-gray-600 mb-4">Pollutants (μg/m³)</p>
+    <div className="bg-[var(--surface-card)] rounded-xl border border-[var(--surface-border)] p-6">
+      <p className="text-sm font-medium text-[var(--text-secondary)] mb-4">Pollutants (μg/m³)</p>
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 16 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#9ca3af' }} />
           <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} />
           <Tooltip formatter={(v) => [`${v as number} μg/m³`]} />
-          <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+          <Bar
+            dataKey="value"
+            radius={[4, 4, 0, 0]}
+            isAnimationActive={true}
+            animationDuration={700}
+            animationEasing="ease-out"
+          >
             {data.map(entry => (
               <Cell key={entry.key} fill={COLORS[entry.key]} />
             ))}
