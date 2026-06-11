@@ -1,51 +1,56 @@
 """Shared pytest configuration.
 
-Mocks heavy optional dependencies (asyncpg, sklearn, xgboost) and
-app.database at import time so the unit-test suite runs without a live
-Postgres connection or ML libraries installed.
+Unit tests run on any machine — no database or ML libraries required.
+Integration tests (test_api.py) need asyncpg + PostgreSQL; they skip
+automatically when asyncpg is not importable.
 
-The stubs must be registered in sys.modules BEFORE pytest collects any
-test module; conftest.py at the tests-root is loaded first.
+This conftest installs stubs for heavy deps ONLY when they are absent,
+so the same conftest works both locally and inside the Docker container.
 """
 import os
 import sys
 from unittest.mock import MagicMock
 
-# ---------------------------------------------------------------------------
-# Minimal environment so pydantic-settings doesn't raise ValidationError
-# ---------------------------------------------------------------------------
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://aqi_user:aqi_pass@localhost:5434/aqi_db")
 os.environ.setdefault("OPENWEATHER_API_KEY", "test_key")
 
-# ---------------------------------------------------------------------------
-# Stub: sklearn (not installed in the host dev environment)
-# ---------------------------------------------------------------------------
-_sklearn = MagicMock()
-_sklearn.ensemble = MagicMock()
-_sklearn.ensemble.IsolationForest = MagicMock
-sys.modules.setdefault("sklearn", _sklearn)
-sys.modules.setdefault("sklearn.ensemble", _sklearn.ensemble)
+# ------------------------------------------------------------------
+# Stub heavy deps that are missing in local dev but present in Docker.
+# Stubs are registered before pytest collects any test module.
+# ------------------------------------------------------------------
+def _mock(name: str, **attrs):
+    m = MagicMock()
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    sys.modules.setdefault(name, m)
+    return m
 
-# ---------------------------------------------------------------------------
-# Stub: xgboost (not installed in the host dev environment)
-# ---------------------------------------------------------------------------
-_xgboost = MagicMock()
-_xgboost.XGBRegressor = MagicMock
-sys.modules.setdefault("xgboost", _xgboost)
+try:
+    import sklearn  # noqa: F401
+except ImportError:
+    _sk = _mock("sklearn")
+    _sk_ens = _mock("sklearn.ensemble", IsolationForest=MagicMock)
+    _sk.ensemble = _sk_ens
 
-# ---------------------------------------------------------------------------
-# Stub: app.database — prevents SQLAlchemy from calling create_async_engine
-# (which would import asyncpg) at module import time.
-# ---------------------------------------------------------------------------
-from sqlalchemy.orm import DeclarativeBase  # noqa: E402
+try:
+    import xgboost  # noqa: F401
+except ImportError:
+    _mock("xgboost", XGBRegressor=MagicMock)
 
+try:
+    import asyncpg  # noqa: F401
+    # asyncpg is present → app.database can create a real engine; no stub needed.
+except ImportError:
+    # asyncpg absent → stub the whole database module so SQLAlchemy never tries
+    # to import asyncpg at module-load time.  Unit tests don't touch the DB at
+    # all, and integration tests skip themselves via pytest.importorskip.
+    from sqlalchemy.orm import DeclarativeBase
 
-class _TestBase(DeclarativeBase):
-    pass
+    class _TestBase(DeclarativeBase):
+        pass
 
-
-_db = MagicMock()
-_db.Base = _TestBase
-_db.get_db = MagicMock()
-_db.AsyncSessionLocal = MagicMock()
-sys.modules["app.database"] = _db
+    _db = MagicMock()
+    _db.Base = _TestBase
+    _db.get_db = MagicMock()
+    _db.AsyncSessionLocal = MagicMock()
+    sys.modules["app.database"] = _db
