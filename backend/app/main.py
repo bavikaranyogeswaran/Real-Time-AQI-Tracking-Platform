@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 
 from app.api import alerts, analytics, aqi, locations
 from app.config import settings
-from app.database import AsyncSessionLocal
+from app.database import AsyncSessionLocal, init_db
 from app.logging_config import configure_logging
 from app.metrics import http_requests_total
 from app.models.alert_rule import AlertRule
@@ -61,8 +61,34 @@ async def _seed_default_alert_rules() -> None:
         await session.commit()
 
 
+def _validate_config() -> None:
+    """Fail fast if required secrets are missing; warn about optional ones."""
+    errors: list[str] = []
+
+    if not settings.database_url:
+        errors.append(
+            "DATABASE_URL is not set. "
+            "Add DATABASE_URL=postgresql+asyncpg://user:pass@host:port/db to your .env file."
+        )
+
+    if errors:
+        for msg in errors:
+            logger.critical("CONFIG ERROR: %s", msg)
+        raise RuntimeError(f"Missing required configuration: {'; '.join(errors)}")
+
+    if not settings.openweather_api_key:
+        logger.warning(
+            "OPENWEATHER_API_KEY is not set — "
+            "AQI ingestion will fail until OPENWEATHER_API_KEY is configured"
+        )
+    if not settings.smtp_username:
+        logger.warning("SMTP credentials not configured — email alert notifications are disabled")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _validate_config()
+    init_db()
     await _seed_default_alert_rules()
     start_scheduler()
     db_host = urlparse(settings.database_url).hostname or "unknown"
