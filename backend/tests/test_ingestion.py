@@ -15,7 +15,7 @@ from app.services.ingestion import calculate_aqi_from_pm25, get_aqi_category, va
     (6.0,   25),    # midpoint of Good band
     (12.0,  50),    # top of Good band
     (12.1,  51),    # bottom of Moderate
-    (23.75, 75),    # midpoint of Moderate
+    (23.75, 76),    # midpoint of Moderate (75.5 → rounds to 76 via banker's rounding)
     (35.4,  100),   # top of Moderate
     (35.5,  101),   # bottom of USG
     (55.4,  150),   # top of USG
