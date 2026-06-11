@@ -9,6 +9,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import _rate_limit_exceeded_handler
 from sqlalchemy import select, text
 
 from app.api import alerts, analytics, aqi, locations
@@ -17,6 +19,7 @@ from app.database import AsyncSessionLocal
 from app.logging_config import configure_logging
 from app.metrics import http_requests_total
 from app.models.alert_rule import AlertRule
+from app.rate_limit import limiter
 from pipeline.scheduler import scheduler, start_scheduler
 
 configure_logging(settings.log_format)
@@ -81,6 +84,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,

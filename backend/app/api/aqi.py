@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
 from app.models.prediction import AQIPrediction
+from app.rate_limit import limiter
 from app.schemas.aqi_schema import CurrentAQIOut, ForecastOut, HistoryAQIOut, PollutantOut
 from app.services.ingestion import get_aqi_category
 
@@ -23,7 +24,9 @@ async def _get_location(session: AsyncSession, city: str) -> Location:
 
 
 @router.get("/aqi/current", response_model=CurrentAQIOut)
+@limiter.limit("60/minute")
 async def get_current_aqi(
+    request: Request,
     city: str = Query(...),
     session: AsyncSession = Depends(get_db),
 ):
@@ -56,7 +59,9 @@ async def get_current_aqi(
 
 
 @router.get("/aqi/history", response_model=list[HistoryAQIOut])
+@limiter.limit("30/minute")
 async def get_history(
+    request: Request,
     city: str = Query(...),
     days: int = Query(default=7, ge=1, le=90),
     session: AsyncSession = Depends(get_db),
@@ -90,7 +95,9 @@ async def get_history(
 
 
 @router.get("/aqi/pollutants", response_model=PollutantOut)
+@limiter.limit("30/minute")
 async def get_pollutants(
+    request: Request,
     city: str = Query(...),
     session: AsyncSession = Depends(get_db),
 ):
@@ -108,7 +115,9 @@ async def get_pollutants(
 
 
 @router.get("/aqi/forecast", response_model=list[ForecastOut])
+@limiter.limit("30/minute")
 async def get_forecast(
+    request: Request,
     city: str = Query(...),
     session: AsyncSession = Depends(get_db),
 ):

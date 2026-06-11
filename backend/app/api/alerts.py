@@ -1,12 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.alert import Alert
 from app.models.alert_rule import AlertRule
+from app.rate_limit import limiter
 from app.schemas.alert_schema import AlertOut, AlertRuleIn
 from app.services.alert_engine import resolve_alert as engine_resolve_alert
 
@@ -14,7 +15,8 @@ router = APIRouter()
 
 
 @router.get("/alerts", response_model=list[AlertOut])
-async def get_alerts(session: AsyncSession = Depends(get_db)):
+@limiter.limit("60/minute")
+async def get_alerts(request: Request, session: AsyncSession = Depends(get_db)):
     result = await session.execute(
         select(Alert).where(Alert.status == "active").order_by(Alert.created_at.desc())
     )
@@ -22,7 +24,9 @@ async def get_alerts(session: AsyncSession = Depends(get_db)):
 
 
 @router.post("/alerts/rules", status_code=201)
+@limiter.limit("10/minute")
 async def create_alert_rule(
+    request: Request,
     body: AlertRuleIn,
     session: AsyncSession = Depends(get_db),
 ):
@@ -46,7 +50,9 @@ async def create_alert_rule(
 
 
 @router.patch("/alerts/{alert_id}/resolve", response_model=AlertOut)
+@limiter.limit("20/minute")
 async def resolve_alert(
+    request: Request,
     alert_id: str,
     session: AsyncSession = Depends(get_db),
 ):

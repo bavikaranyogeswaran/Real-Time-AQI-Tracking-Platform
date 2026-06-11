@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.location import Location
+from app.rate_limit import limiter
 from app.schemas.analytics_schema import CityComparisonOut, GapOut, TrendOut
 from app.services.analytics import (
     get_aqi_distribution,
@@ -27,12 +28,15 @@ async def _get_location(session: AsyncSession, city: str) -> Location:
 
 
 @router.get("/analytics/city-comparison", response_model=list[CityComparisonOut])
-async def city_comparison(session: AsyncSession = Depends(get_db)):
+@limiter.limit("30/minute")
+async def city_comparison(request: Request, session: AsyncSession = Depends(get_db)):
     return await get_city_comparison(session)
 
 
 @router.get("/analytics/trends", response_model=list[TrendOut])
+@limiter.limit("30/minute")
 async def trends(
+    request: Request,
     city: str = Query(...),
     period: str = Query(default="weekly"),
     session: AsyncSession = Depends(get_db),
@@ -47,7 +51,9 @@ async def trends(
 
 
 @router.get("/analytics/peak-hours")
+@limiter.limit("30/minute")
 async def peak_hours(
+    request: Request,
     city: str = Query(...),
     session: AsyncSession = Depends(get_db),
 ):
@@ -56,7 +62,9 @@ async def peak_hours(
 
 
 @router.get("/analytics/distribution")
+@limiter.limit("30/minute")
 async def aqi_distribution(
+    request: Request,
     city: str = Query(...),
     session: AsyncSession = Depends(get_db),
 ):
@@ -65,7 +73,9 @@ async def aqi_distribution(
 
 
 @router.get("/analytics/gaps", response_model=list[GapOut])
+@limiter.limit("30/minute")
 async def data_gaps(
+    request: Request,
     city: str = Query(...),
     lookback_hours: int = Query(default=24, ge=1, le=168),
     threshold_minutes: int = Query(default=20, ge=5, le=120),
