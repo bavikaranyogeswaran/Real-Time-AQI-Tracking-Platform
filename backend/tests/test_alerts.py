@@ -7,6 +7,7 @@ Run inside the Docker container:
 
     docker exec aqi_backend python -m pytest tests/test_alerts.py -v
 """
+
 import pytest
 
 pytest.importorskip(

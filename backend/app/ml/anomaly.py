@@ -10,8 +10,16 @@ _MODELS_DIR = Path(__file__).parent.parent.parent / "models"
 
 # No lag features — anomaly detection scores a single reading in isolation
 ANOMALY_FEATURE_COLS = [
-    "aqi", "pm25", "pm10", "co", "no2", "so2", "o3",
-    "hour", "day_of_week", "month",
+    "aqi",
+    "pm25",
+    "pm10",
+    "co",
+    "no2",
+    "so2",
+    "o3",
+    "hour",
+    "day_of_week",
+    "month",
 ]
 
 

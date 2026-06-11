@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy import select
@@ -18,10 +18,10 @@ OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/air_pollution"
 
 # US EPA PM2.5 breakpoints: (C_lo, C_hi, AQI_lo, AQI_hi)
 _PM25_BREAKPOINTS = [
-    (0.0,   12.0,  0,   50),
-    (12.1,  35.4,  51,  100),
-    (35.5,  55.4,  101, 150),
-    (55.5,  150.4, 151, 200),
+    (0.0, 12.0, 0, 50),
+    (12.1, 35.4, 51, 100),
+    (35.5, 55.4, 101, 150),
+    (55.5, 150.4, 151, 200),
     (150.5, 250.4, 201, 300),
     (250.5, 350.4, 301, 400),
     (350.5, 500.4, 401, 500),
@@ -82,9 +82,7 @@ def validate_reading(data: dict) -> bool:
         return False
 
 
-async def save_reading(
-    session: AsyncSession, location_id: str, data: dict
-) -> AirQualityReading:
+async def save_reading(session: AsyncSession, location_id: str, data: dict) -> AirQualityReading:
     """Parse a validated API response and persist a new AirQualityReading row.
 
     Returns the existing row unchanged if one already exists for this
@@ -95,7 +93,7 @@ async def save_reading(
     components = entry["components"]
     pm25 = components.get("pm2_5", 0.0)
     aqi = calculate_aqi_from_pm25(pm25)
-    timestamp = datetime.fromtimestamp(entry["dt"], tz=timezone.utc)
+    timestamp = datetime.fromtimestamp(entry["dt"], tz=UTC)
 
     existing = await session.scalar(
         select(AirQualityReading).where(
@@ -104,7 +102,9 @@ async def save_reading(
         )
     )
     if existing:
-        logger.debug("Duplicate reading for location %s at %s — skipping insert.", location_id, timestamp)
+        logger.debug(
+            "Duplicate reading for location %s at %s — skipping insert.", location_id, timestamp
+        )
         return existing
 
     reading = AirQualityReading(
@@ -206,6 +206,6 @@ async def fetch_air_quality(lat: float, lon: float) -> dict:
     """Call OpenWeather Air Pollution API and return the raw response dict."""
     params = {"lat": lat, "lon": lon, "appid": settings.openweather_api_key}
     async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(OPENWEATHER_URL, params=params)
+        response = await client.get(OPENWEATHER_URL, params=params)  # type: ignore[arg-type]
         response.raise_for_status()
         return response.json()

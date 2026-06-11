@@ -19,9 +19,7 @@ _PERIOD_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
 
 
 async def _get_location(session: AsyncSession, city: str) -> Location:
-    result = await session.execute(
-        select(Location).where(Location.city.ilike(city))
-    )
+    result = await session.execute(select(Location).where(Location.city.ilike(city)))
     location = result.scalars().first()
     if not location:
         raise HTTPException(status_code=404, detail=f"City '{city}' not found")
@@ -74,6 +72,4 @@ async def data_gaps(
     session: AsyncSession = Depends(get_db),
 ):
     location = await _get_location(session, city)
-    return await get_data_gaps(
-        session, location.location_id, lookback_hours, threshold_minutes
-    )
+    return await get_data_gaps(session, location.location_id, lookback_hours, threshold_minutes)

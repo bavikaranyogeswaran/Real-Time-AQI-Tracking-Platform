@@ -1,14 +1,23 @@
 import pickle
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 from xgboost import XGBRegressor
 
 FEATURE_COLS = [
-    "pm25", "pm10", "co", "no2", "so2", "o3",
-    "aqi_lag_1h", "aqi_lag_3h", "aqi_lag_24h",
-    "hour", "day_of_week", "month", "is_weekend",
+    "pm25",
+    "pm10",
+    "co",
+    "no2",
+    "so2",
+    "o3",
+    "aqi_lag_1h",
+    "aqi_lag_3h",
+    "aqi_lag_24h",
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
 ]
 
 _MODELS_DIR = Path(__file__).parent.parent.parent / "models"

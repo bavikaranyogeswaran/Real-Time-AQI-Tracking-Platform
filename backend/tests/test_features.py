@@ -3,7 +3,8 @@
 Uses SimpleNamespace to stand in for AirQualityReading ORM objects so no
 database is needed.
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pandas as pd
@@ -14,10 +15,10 @@ from app.ml.features import build_feature_df
 
 def _reading(ts: str, aqi: int, **kwargs) -> SimpleNamespace:
     """Create a lightweight mock AirQualityReading."""
-    defaults = dict(pm25=10.0, pm10=20.0, co=200.0, no2=5.0, so2=2.0, o3=50.0)
+    defaults = {"pm25": 10.0, "pm10": 20.0, "co": 200.0, "no2": 5.0, "so2": 2.0, "o3": 50.0}
     defaults.update(kwargs)
     return SimpleNamespace(
-        timestamp=datetime.fromisoformat(ts).replace(tzinfo=timezone.utc),
+        timestamp=datetime.fromisoformat(ts).replace(tzinfo=UTC),
         aqi=float(aqi),
         **defaults,
     )
@@ -26,6 +27,7 @@ def _reading(ts: str, aqi: int, **kwargs) -> SimpleNamespace:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 def test_empty_input_returns_empty_df():
     df = build_feature_df([])
@@ -44,15 +46,26 @@ def test_single_reading_returns_non_empty_df():
 # ---------------------------------------------------------------------------
 
 EXPECTED_COLS = {
-    "aqi", "pm25", "pm10", "co", "no2", "so2", "o3",
-    "aqi_lag_1h", "aqi_lag_3h", "aqi_lag_24h",
-    "hour", "day_of_week", "month", "is_weekend",
+    "aqi",
+    "pm25",
+    "pm10",
+    "co",
+    "no2",
+    "so2",
+    "o3",
+    "aqi_lag_1h",
+    "aqi_lag_3h",
+    "aqi_lag_24h",
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
 }
 
 
 def _hourly_readings(n: int, base: str = "2024-01-15T00:00:00") -> list:
     """Generate n hourly readings starting from base."""
-    base_dt = datetime.fromisoformat(base).replace(tzinfo=timezone.utc)
+    base_dt = datetime.fromisoformat(base).replace(tzinfo=UTC)
     return [
         _reading(
             (base_dt + pd.Timedelta(hours=i)).isoformat(),
@@ -79,6 +92,7 @@ def test_no_nan_in_output():
 # Time features
 # ---------------------------------------------------------------------------
 
+
 def test_is_weekend_flag():
     # 2024-01-13 is Saturday (day_of_week=5 → is_weekend=1)
     # 2024-01-15 is Monday  (day_of_week=0 → is_weekend=0)
@@ -88,7 +102,7 @@ def test_is_weekend_flag():
     ]
     df = build_feature_df(readings)
     saturday_rows = df[df["day_of_week"] == 5]
-    monday_rows   = df[df["day_of_week"] == 0]
+    monday_rows = df[df["day_of_week"] == 0]
     assert (saturday_rows["is_weekend"] == 1).all()
     assert (monday_rows["is_weekend"] == 0).all()
 
@@ -108,6 +122,7 @@ def test_month_range():
 # ---------------------------------------------------------------------------
 # Lag feature correctness
 # ---------------------------------------------------------------------------
+
 
 def test_lag_1h_matches_previous_reading():
     # With exactly 1-hour gaps the lag_1h should equal the previous row's AQI.
@@ -129,8 +144,10 @@ def test_lag_values_are_numeric():
 # Sorting is stable (output sorted by timestamp ascending)
 # ---------------------------------------------------------------------------
 
+
 def test_output_sorted_ascending():
     import random
+
     readings = _hourly_readings(20)
     random.shuffle(readings)
     df = build_feature_df(readings)

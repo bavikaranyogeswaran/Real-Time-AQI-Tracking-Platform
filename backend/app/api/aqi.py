@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -15,9 +15,7 @@ router = APIRouter()
 
 
 async def _get_location(session: AsyncSession, city: str) -> Location:
-    result = await session.execute(
-        select(Location).where(Location.city.ilike(city))
-    )
+    result = await session.execute(select(Location).where(Location.city.ilike(city)))
     location = result.scalars().first()
     if not location:
         raise HTTPException(status_code=404, detail=f"City '{city}' not found")
@@ -64,7 +62,7 @@ async def get_history(
     session: AsyncSession = Depends(get_db),
 ):
     location = await _get_location(session, city)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
     result = await session.execute(
         select(AirQualityReading)
         .where(

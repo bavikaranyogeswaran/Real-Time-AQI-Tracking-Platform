@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,10 +9,8 @@ from app.models.location import Location
 from app.services.ingestion import get_aqi_category
 
 
-async def get_daily_averages(
-    session: AsyncSession, location_id: str, days: int
-) -> list[dict]:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+async def get_daily_averages(session: AsyncSession, location_id: str, days: int) -> list[dict]:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
     date_col = cast(AirQualityReading.timestamp, Date).label("date")
     result = await session.execute(
         select(
@@ -39,9 +37,7 @@ async def get_daily_averages(
     ]
 
 
-async def get_hourly_averages(
-    session: AsyncSession, location_id: str
-) -> list[dict]:
+async def get_hourly_averages(session: AsyncSession, location_id: str) -> list[dict]:
     hour_col = func.extract("hour", AirQualityReading.timestamp).label("hour")
     result = await session.execute(
         select(
@@ -53,14 +49,11 @@ async def get_hourly_averages(
         .order_by(hour_col.asc())
     )
     return [
-        {"hour": int(row.hour), "avg_aqi": round(float(row.avg_aqi), 1)}
-        for row in result.all()
+        {"hour": int(row.hour), "avg_aqi": round(float(row.avg_aqi), 1)} for row in result.all()
     ]
 
 
-async def get_aqi_distribution(
-    session: AsyncSession, location_id: str
-) -> list[dict]:
+async def get_aqi_distribution(session: AsyncSession, location_id: str) -> list[dict]:
     category_col = case(
         (AirQualityReading.aqi <= 50, "Good"),
         (AirQualityReading.aqi <= 100, "Moderate"),
@@ -90,8 +83,8 @@ async def get_data_gaps(
     apart (default 20 min = 2× the 10-min poll cycle), or when the most recent
     reading is older than threshold_minutes relative to now.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-    now = datetime.now(timezone.utc)
+    cutoff = datetime.now(UTC) - timedelta(hours=lookback_hours)
+    now = datetime.now(UTC)
 
     rows = await session.scalars(
         select(AirQualityReading.timestamp)

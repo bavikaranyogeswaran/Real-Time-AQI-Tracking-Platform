@@ -2,7 +2,7 @@ import asyncio
 import logging
 import smtplib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.mime.text import MIMEText
 
 from sqlalchemy import and_, or_, select
@@ -34,7 +34,7 @@ async def check_threshold_rules(
             ),
         )
     )
-    return result.scalars().all()
+    return list(result.scalars().all())
 
 
 async def create_alert(
@@ -45,7 +45,7 @@ async def create_alert(
     actual_aqi: int,
 ) -> Alert | None:
     """Insert an Alert row, skipping if an identical alert exists within the last 60 min."""
-    dedup_cutoff = datetime.now(timezone.utc) - _DEDUP_WINDOW
+    dedup_cutoff = datetime.now(UTC) - _DEDUP_WINDOW
     existing = await session.execute(
         select(Alert).where(
             and_(
@@ -58,9 +58,7 @@ async def create_alert(
         )
     )
     if existing.scalars().first():
-        logger.debug(
-            "Dedup: skipping duplicate %s alert for location %s.", alert_type, location_id
-        )
+        logger.debug("Dedup: skipping duplicate %s alert for location %s.", alert_type, location_id)
         return None
 
     alert = Alert(
@@ -70,13 +68,16 @@ async def create_alert(
         threshold_value=threshold_value,
         actual_aqi=actual_aqi,
         status="active",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(alert)
     await session.flush()
     logger.info(
         "Alert created — type=%s, location=%s, AQI=%d (threshold %d).",
-        alert_type, location_id, actual_aqi, threshold_value,
+        alert_type,
+        location_id,
+        actual_aqi,
+        threshold_value,
     )
     return alert
 

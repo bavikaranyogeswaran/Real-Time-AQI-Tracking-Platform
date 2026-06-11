@@ -7,6 +7,7 @@ Run inside the Docker container:
 
     docker exec aqi_backend python -m pytest tests/test_analytics.py -v
 """
+
 import pytest
 
 pytest.importorskip(
@@ -20,6 +21,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 # ---------------------------------------------------------------------------
 # /api/analytics/city-comparison
 # ---------------------------------------------------------------------------
+
 
 async def test_city_comparison_returns_200_list(client):
     r = await client.get("/api/analytics/city-comparison")
@@ -37,24 +39,34 @@ async def test_city_comparison_includes_test_city(client, test_data):
 # /api/analytics/trends
 # ---------------------------------------------------------------------------
 
+
 async def test_trends_weekly_returns_200_list(client, test_data):
-    r = await client.get("/api/analytics/trends", params={
-        "city": test_data["city"], "period": "weekly",
-    })
+    r = await client.get(
+        "/api/analytics/trends",
+        params={
+            "city": test_data["city"],
+            "period": "weekly",
+        },
+    )
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
 async def test_trends_invalid_period_returns_400(client, test_data):
-    r = await client.get("/api/analytics/trends", params={
-        "city": test_data["city"], "period": "decadely",
-    })
+    r = await client.get(
+        "/api/analytics/trends",
+        params={
+            "city": test_data["city"],
+            "period": "decadely",
+        },
+    )
     assert r.status_code == 400
 
 
 # ---------------------------------------------------------------------------
 # /api/analytics/peak-hours
 # ---------------------------------------------------------------------------
+
 
 async def test_peak_hours_returns_200_list(client, test_data):
     r = await client.get("/api/analytics/peak-hours", params={"city": test_data["city"]})
@@ -65,6 +77,7 @@ async def test_peak_hours_returns_200_list(client, test_data):
 # ---------------------------------------------------------------------------
 # /api/analytics/distribution
 # ---------------------------------------------------------------------------
+
 
 async def test_distribution_returns_200_with_expected_shape(client, test_data):
     r = await client.get("/api/analytics/distribution", params={"city": test_data["city"]})

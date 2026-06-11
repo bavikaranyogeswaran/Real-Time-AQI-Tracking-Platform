@@ -7,12 +7,17 @@ Integration tests (test_locations.py, test_aqi.py, test_alerts.py,
 test_analytics.py) need asyncpg + a live PostgreSQL instance on port 5434.
 They skip automatically when asyncpg is not importable.
 """
+
 import os
 import sys
+from datetime import UTC
 from unittest.mock import MagicMock
 
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://aqi_user:aqi_pass@localhost:5434/aqi_db")
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+asyncpg://aqi_user:aqi_pass@localhost:5434/aqi_db"
+)
 os.environ.setdefault("OPENWEATHER_API_KEY", "test_key")
+
 
 # ---------------------------------------------------------------------------
 # Stub heavy deps that are missing in local dev but present in Docker.
@@ -40,6 +45,7 @@ except ImportError:
 
 try:
     import asyncpg  # noqa: F401
+
     _ASYNCPG_AVAILABLE = True
 except ImportError:
     # asyncpg absent → stub the whole database module so SQLAlchemy never tries
@@ -63,7 +69,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 if _ASYNCPG_AVAILABLE:
     import uuid
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     import pytest_asyncio
     from fastapi import FastAPI
@@ -84,8 +90,8 @@ if _ASYNCPG_AVAILABLE:
     # Minimal FastAPI app: all routers, no scheduler or seed lifespan.
     _app = FastAPI(title="AQI Test")
     _app.include_router(locations_mod.router, prefix="/api")
-    _app.include_router(aqi_mod.router,       prefix="/api")
-    _app.include_router(alerts_mod.router,    prefix="/api")
+    _app.include_router(aqi_mod.router, prefix="/api")
+    _app.include_router(alerts_mod.router, prefix="/api")
     _app.include_router(analytics_mod.router, prefix="/api")
 
     @_app.get("/health")
@@ -103,52 +109,62 @@ if _ASYNCPG_AVAILABLE:
         """Insert one Location + 5 Readings + 1 Alert; delete everything after the session."""
         loc_id = f"test-{uuid.uuid4()}"
         alert_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with SessionLocal() as session:
-            session.add(Location(
-                location_id=loc_id,
-                city="Testville",
-                country="Testland",
-                latitude=1.23,
-                longitude=4.56,
-                source="test",
-            ))
+            session.add(
+                Location(
+                    location_id=loc_id,
+                    city="Testville",
+                    country="Testland",
+                    latitude=1.23,
+                    longitude=4.56,
+                    source="test",
+                )
+            )
             await session.flush()  # ensure FK target exists before readings/alerts
             for i in range(5):
-                session.add(AirQualityReading(
-                    reading_id=str(uuid.uuid4()),
+                session.add(
+                    AirQualityReading(
+                        reading_id=str(uuid.uuid4()),
+                        location_id=loc_id,
+                        timestamp=now - timedelta(hours=i),
+                        aqi=85 + i,
+                        pm25=10.0 + i,
+                        pm10=20.0,
+                        co=200.0,
+                        no2=5.0,
+                        so2=2.0,
+                        o3=50.0,
+                        data_source="test",
+                    )
+                )
+            session.add(
+                Alert(
+                    alert_id=alert_id,
                     location_id=loc_id,
-                    timestamp=now - timedelta(hours=i),
-                    aqi=85 + i,
-                    pm25=10.0 + i,
-                    pm10=20.0,
-                    co=200.0,
-                    no2=5.0,
-                    so2=2.0,
-                    o3=50.0,
-                    data_source="test",
-                ))
-            session.add(Alert(
-                alert_id=alert_id,
-                location_id=loc_id,
-                alert_type="unhealthy",
-                threshold_value=150,
-                actual_aqi=180,
-                status="active",
-                created_at=now,
-            ))
+                    alert_type="unhealthy",
+                    threshold_value=150,
+                    actual_aqi=180,
+                    status="active",
+                    created_at=now,
+                )
+            )
             await session.commit()
 
         yield {"location_id": loc_id, "city": "Testville", "alert_id": alert_id}
 
-        from app.models.alert_rule import AlertRule  # imported late to avoid circular at module load
+        from app.models.alert_rule import (
+            AlertRule,  # imported late to avoid circular at module load
+        )
 
         async with SessionLocal() as session:
             await session.execute(delete(AlertRule).where(AlertRule.location_id == loc_id))
             await session.execute(delete(Alert).where(Alert.location_id == loc_id))
-            await session.execute(delete(AirQualityReading).where(AirQualityReading.location_id == loc_id))
+            await session.execute(
+                delete(AirQualityReading).where(AirQualityReading.location_id == loc_id)
+            )
             await session.execute(delete(Location).where(Location.location_id == loc_id))
             await session.commit()
 

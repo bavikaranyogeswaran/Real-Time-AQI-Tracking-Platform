@@ -16,9 +16,7 @@ router = APIRouter()
 @router.get("/alerts", response_model=list[AlertOut])
 async def get_alerts(session: AsyncSession = Depends(get_db)):
     result = await session.execute(
-        select(Alert)
-        .where(Alert.status == "active")
-        .order_by(Alert.created_at.desc())
+        select(Alert).where(Alert.status == "active").order_by(Alert.created_at.desc())
     )
     return result.scalars().all()
 

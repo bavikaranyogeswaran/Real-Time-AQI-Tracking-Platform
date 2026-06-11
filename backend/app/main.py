@@ -10,15 +10,15 @@ from app.api import alerts, analytics, aqi, locations
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.alert_rule import AlertRule
-from pipeline.scheduler import start_scheduler, scheduler
+from pipeline.scheduler import scheduler, start_scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _DEFAULT_RULES = [
-    {"alert_type": "unhealthy",       "threshold_value": 150},
-    {"alert_type": "very_unhealthy",  "threshold_value": 200},
-    {"alert_type": "hazardous",       "threshold_value": 300},
+    {"alert_type": "unhealthy", "threshold_value": 150},
+    {"alert_type": "very_unhealthy", "threshold_value": 200},
+    {"alert_type": "hazardous", "threshold_value": 300},
 ]
 
 
@@ -33,14 +33,20 @@ async def _seed_default_alert_rules() -> None:
                 )
             )
             if not exists:
-                session.add(AlertRule(
-                    rule_id=str(uuid.uuid4()),
-                    location_id=None,
-                    alert_type=rule_def["alert_type"],
-                    threshold_value=rule_def["threshold_value"],
-                    is_active=True,
-                ))
-                logger.info("Seeded default alert rule: %s > %d", rule_def["alert_type"], rule_def["threshold_value"])
+                session.add(
+                    AlertRule(
+                        rule_id=str(uuid.uuid4()),
+                        location_id=None,
+                        alert_type=rule_def["alert_type"],
+                        threshold_value=rule_def["threshold_value"],
+                        is_active=True,
+                    )
+                )
+                logger.info(
+                    "Seeded default alert rule: %s > %d",
+                    rule_def["alert_type"],
+                    rule_def["threshold_value"],
+                )
         await session.commit()
 
 

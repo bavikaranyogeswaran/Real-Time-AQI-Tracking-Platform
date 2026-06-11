@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 import pandas as pd
 
 from app.models.air_quality import AirQualityReading
@@ -12,7 +14,7 @@ _LAG_WINDOWS = [
 _LAG_TOLERANCE = pd.Timedelta("15min")
 
 
-def build_feature_df(readings: list[AirQualityReading]) -> pd.DataFrame:
+def build_feature_df(readings: Sequence[AirQualityReading]) -> pd.DataFrame:
     """Build a feature matrix from a list of AirQualityReading ORM objects.
 
     Features:

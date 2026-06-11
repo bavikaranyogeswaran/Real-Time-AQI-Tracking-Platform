@@ -5,6 +5,7 @@ Run inside the Docker container:
 
     docker exec aqi_backend python -m pytest tests/test_aqi.py -v
 """
+
 import pytest
 
 pytest.importorskip(
@@ -18,6 +19,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 # ---------------------------------------------------------------------------
 # /api/aqi/current
 # ---------------------------------------------------------------------------
+
 
 async def test_current_valid_city_returns_200(client, test_data):
     r = await client.get("/api/aqi/current", params={"city": test_data["city"]})
@@ -46,6 +48,7 @@ async def test_current_case_insensitive(client, test_data):
 # /api/aqi/history
 # ---------------------------------------------------------------------------
 
+
 async def test_history_returns_200_list(client, test_data):
     r = await client.get("/api/aqi/history", params={"city": test_data["city"]})
     assert r.status_code == 200
@@ -73,6 +76,7 @@ async def test_history_days_zero_returns_422(client, test_data):
 # /api/aqi/pollutants
 # ---------------------------------------------------------------------------
 
+
 async def test_pollutants_returns_200_with_required_fields(client, test_data):
     r = await client.get("/api/aqi/pollutants", params={"city": test_data["city"]})
     assert r.status_code == 200
@@ -84,6 +88,7 @@ async def test_pollutants_returns_200_with_required_fields(client, test_data):
 # ---------------------------------------------------------------------------
 # /api/aqi/forecast
 # ---------------------------------------------------------------------------
+
 
 async def test_forecast_returns_200_list(client, test_data):
     r = await client.get("/api/aqi/forecast", params={"city": test_data["city"]})

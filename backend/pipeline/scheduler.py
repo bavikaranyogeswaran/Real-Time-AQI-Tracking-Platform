@@ -72,4 +72,6 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     scheduler.start()
-    logger.info("Scheduler started — ingestion every 10 min, forecast every hour, retrain daily at 02:00.")
+    logger.info(
+        "Scheduler started — ingestion every 10 min, forecast every hour, retrain daily at 02:00."
+    )

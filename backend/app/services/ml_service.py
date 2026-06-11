@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,17 +26,21 @@ async def run_forecast_for_location(session: AsyncSession, location: Location) -
 
     Returns the number of predictions inserted (0 if skipped).
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=_FORECAST_LOOKBACK_DAYS)
+    cutoff = datetime.now(UTC) - timedelta(days=_FORECAST_LOOKBACK_DAYS)
     readings = (
-        await session.execute(
-            select(AirQualityReading)
-            .where(
-                AirQualityReading.location_id == location.location_id,
-                AirQualityReading.timestamp >= cutoff,
+        (
+            await session.execute(
+                select(AirQualityReading)
+                .where(
+                    AirQualityReading.location_id == location.location_id,
+                    AirQualityReading.timestamp >= cutoff,
+                )
+                .order_by(AirQualityReading.timestamp.asc())
             )
-            .order_by(AirQualityReading.timestamp.asc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if len(readings) < 5:
         logger.debug("Skipping forecast for %s — only %d readings.", location.city, len(readings))
@@ -61,7 +65,7 @@ async def run_forecast_for_location(session: AsyncSession, location: Location) -
         delete(AQIPrediction).where(AQIPrediction.location_id == location.location_id)
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for p in predictions:
         session.add(
             AQIPrediction(
