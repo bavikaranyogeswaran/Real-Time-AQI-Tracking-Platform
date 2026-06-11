@@ -20,6 +20,7 @@ from app.logging_config import configure_logging
 from app.metrics import http_requests_total
 from app.models.alert_rule import AlertRule
 from app.rate_limit import limiter
+from app.security_headers import SecurityHeadersMiddleware
 from pipeline.scheduler import scheduler, start_scheduler
 
 configure_logging(settings.log_format)
@@ -95,6 +96,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.middleware("http")
