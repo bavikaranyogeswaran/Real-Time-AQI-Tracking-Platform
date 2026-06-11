@@ -8,8 +8,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-aqi_db}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5434:5432"
+    networks:
+      - db_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aqi_user} -d ${POSTGRES_DB:-aqi_db}"]
       interval: 10s
@@ -30,6 +30,9 @@ services:
       - .env
     ports:
       - "8000:8000"
+    networks:
+      - db_net
+      - web_net
     depends_on:
       db:
         condition: service_healthy
@@ -53,6 +56,8 @@ services:
     container_name: aqi_frontend
     ports:
       - "80:80"
+    networks:
+      - web_net
     depends_on:
       - backend
     restart: unless-stopped
@@ -61,6 +66,12 @@ services:
         limits:
           memory: 64m
           cpus: "0.25"
+
+networks:
+  db_net:
+    driver: bridge
+  web_net:
+    driver: bridge
 
 volumes:
   pgdata:
