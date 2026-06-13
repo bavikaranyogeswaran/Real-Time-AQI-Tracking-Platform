@@ -11,6 +11,9 @@ FEATURE_COLS = [
     "no2",
     "so2",
     "o3",
+    "temperature",
+    "humidity",
+    "wind_speed",
     "aqi_lag_1h",
     "aqi_lag_3h",
     "aqi_lag_24h",
@@ -76,9 +79,15 @@ def predict_next_24h(location_id: str, df: pd.DataFrame) -> list[dict]:
     last = df.iloc[-1]
     last_ts: pd.Timestamp = last["timestamp"]
 
+    # Carry last known weather values forward — we don't have a weather forecast,
+    # so holding the current observation constant is the best available proxy.
+    last_temperature = float(last.get("temperature", 0.0) or 0.0)
+    last_humidity = float(last.get("humidity", 0.0) or 0.0)
+    last_wind_speed = float(last.get("wind_speed", 0.0) or 0.0)
+
     # Build a lookup of historical AQI by timestamp for lag resolution
     ts_series = df["timestamp"]
-    aqi_series = df["aqi"].values
+    aqi_series = df["aqi"].to_numpy()
 
     predicted_aqis: list[float] = []
 
@@ -108,6 +117,9 @@ def predict_next_24h(location_id: str, df: pd.DataFrame) -> list[dict]:
             "no2": float(last["no2"]),
             "so2": float(last["so2"]),
             "o3": float(last["o3"]),
+            "temperature": last_temperature,
+            "humidity": last_humidity,
+            "wind_speed": last_wind_speed,
             "aqi_lag_1h": _lag_aqi(h, 1),
             "aqi_lag_3h": _lag_aqi(h, 3),
             "aqi_lag_24h": _lag_aqi(h, 24),
@@ -118,7 +130,7 @@ def predict_next_24h(location_id: str, df: pd.DataFrame) -> list[dict]:
         }
 
         X = pd.DataFrame([features])[FEATURE_COLS]
-        predicted_aqi = float(max(0.0, model.predict(X)[0]))
+        predicted_aqi = max(0.0, float(model.predict(X)[0]))
         predicted_aqis.append(predicted_aqi)
 
         results.append(

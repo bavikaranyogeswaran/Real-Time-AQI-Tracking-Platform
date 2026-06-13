@@ -29,6 +29,9 @@ BQ_SCHEMA = [
     bigquery.SchemaField("no2", "FLOAT"),
     bigquery.SchemaField("so2", "FLOAT"),
     bigquery.SchemaField("o3", "FLOAT"),
+    bigquery.SchemaField("temperature", "FLOAT"),
+    bigquery.SchemaField("humidity", "FLOAT"),
+    bigquery.SchemaField("wind_speed", "FLOAT"),
     bigquery.SchemaField("data_source", "STRING"),
 ]
 
@@ -118,6 +121,9 @@ async def stream_reading(reading, location) -> None:
         "no2": float(reading.no2) if reading.no2 is not None else None,
         "so2": float(reading.so2) if reading.so2 is not None else None,
         "o3": float(reading.o3) if reading.o3 is not None else None,
+        "temperature": float(reading.temperature) if reading.temperature is not None else None,
+        "humidity": float(reading.humidity) if reading.humidity is not None else None,
+        "wind_speed": float(reading.wind_speed) if reading.wind_speed is not None else None,
         "data_source": reading.data_source,
     }
     try:

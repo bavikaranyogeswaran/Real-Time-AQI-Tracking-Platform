@@ -19,6 +19,7 @@ from app.services.ml_service import check_anomaly_for_reading
 logger = logging.getLogger(__name__)
 
 OPENWEATHER_URL = "https://api.openweathermap.org/data/2.5/air_pollution"
+OPENWEATHER_WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 
 # US EPA PM2.5 breakpoints: (C_lo, C_hi, AQI_lo, AQI_hi)
 _PM25_BREAKPOINTS = [
@@ -86,7 +87,23 @@ def validate_reading(data: dict) -> bool:
         return False
 
 
-async def save_reading(session: AsyncSession, location_id: str, data: dict) -> AirQualityReading:
+def _extract_weather(weather: dict | None) -> tuple[float | None, float | None, float | None]:
+    """Return (temperature_celsius, humidity_pct, wind_speed_ms) from a weather API response."""
+    if not weather:
+        return None, None, None
+    temp_k = weather.get("main", {}).get("temp")
+    temperature = round(temp_k - 273.15, 2) if temp_k is not None else None
+    humidity = weather.get("main", {}).get("humidity")
+    wind_speed = weather.get("wind", {}).get("speed")
+    return temperature, humidity, wind_speed
+
+
+async def save_reading(
+    session: AsyncSession,
+    location_id: str,
+    data: dict,
+    weather: dict | None = None,
+) -> AirQualityReading:
     """Parse a validated API response and persist a new AirQualityReading row.
 
     Returns the existing row unchanged if one already exists for this
@@ -111,6 +128,8 @@ async def save_reading(session: AsyncSession, location_id: str, data: dict) -> A
         )
         return existing
 
+    temperature, humidity, wind_speed = _extract_weather(weather)
+
     reading = AirQualityReading(
         reading_id=str(uuid.uuid4()),
         location_id=location_id,
@@ -122,6 +141,9 @@ async def save_reading(session: AsyncSession, location_id: str, data: dict) -> A
         no2=components.get("no2"),
         so2=components.get("so2"),
         o3=components.get("o3"),
+        temperature=temperature,
+        humidity=humidity,
+        wind_speed=wind_speed,
         data_source="openweather",
     )
     session.add(reading)
@@ -161,12 +183,21 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
     reading, or None if the API call failed or the response failed validation."""
     t0 = time.perf_counter()
 
-    try:
-        data = await fetch_air_quality(location.latitude, location.longitude)
-    except httpx.HTTPError as exc:
-        logger.warning("API fetch failed for %s: %s", location.city, exc)
+    air_result, weather_result = await asyncio.gather(
+        fetch_air_quality(location.latitude, location.longitude),
+        fetch_weather(location.latitude, location.longitude),
+        return_exceptions=True,
+    )
+
+    if isinstance(air_result, BaseException):
+        logger.warning("Air quality fetch failed for %s: %s", location.city, air_result)
         aqi_ingest_total.labels(city=location.city, status="error").inc()
         return None
+
+    data = air_result
+    weather = None if isinstance(weather_result, BaseException) else weather_result
+    if isinstance(weather_result, BaseException):
+        logger.warning("Weather fetch failed for %s (continuing without weather): %s", location.city, weather_result)
 
     if not validate_reading(data):
         logger.warning("Invalid reading received for %s — skipping.", location.city)
@@ -179,7 +210,7 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
         aqi_ingest_total.labels(city=location.city, status="skipped").inc()
         return None
 
-    reading = await save_reading(session, location.location_id, data)
+    reading = await save_reading(session, location.location_id, data, weather)
 
     triggered_rules = await check_threshold_rules(session, location.location_id, reading.aqi)
     for rule in triggered_rules:
@@ -220,5 +251,14 @@ async def fetch_air_quality(lat: float, lon: float) -> dict:
     params = {"lat": lat, "lon": lon, "appid": settings.openweather_api_key}
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(OPENWEATHER_URL, params=params)  # type: ignore[arg-type]
+        response.raise_for_status()
+        return response.json()
+
+
+async def fetch_weather(lat: float, lon: float) -> dict:
+    """Call OpenWeather Current Weather API and return the raw response dict."""
+    params = {"lat": lat, "lon": lon, "appid": settings.openweather_api_key}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(OPENWEATHER_WEATHER_URL, params=params)  # type: ignore[arg-type]
         response.raise_for_status()
         return response.json()

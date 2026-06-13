@@ -18,6 +18,9 @@ class AirQualityReading(Base):
     no2: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
     so2: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
     o3: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    temperature: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)   # °C
+    humidity: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)      # %
+    wind_speed: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)    # m/s
     data_source: Mapped[str] = mapped_column(String(100), nullable=False, default="openweather")
 
     __table_args__ = (
