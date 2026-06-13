@@ -103,6 +103,7 @@ async def save_reading(
     location_id: str,
     data: dict,
     weather: dict | None = None,
+    data_source: str = "openweather",
 ) -> AirQualityReading:
     """Parse a validated API response and persist a new AirQualityReading row.
 
@@ -144,11 +145,45 @@ async def save_reading(
         temperature=temperature,
         humidity=humidity,
         wind_speed=wind_speed,
-        data_source="openweather",
+        data_source=data_source,
     )
     session.add(reading)
     await session.flush()
     return reading
+
+
+async def _post_save_pipeline(
+    session: AsyncSession,
+    location: Location,
+    reading: AirQualityReading,
+) -> None:
+    """Run threshold alerts, anomaly detection, commit, and BigQuery streaming."""
+    triggered_rules = await check_threshold_rules(session, location.location_id, reading.aqi)
+    for rule in triggered_rules:
+        alert = await create_alert(
+            session,
+            location_id=location.location_id,
+            alert_type=rule.alert_type,
+            threshold_value=rule.threshold_value,
+            actual_aqi=reading.aqi,
+        )
+        if alert:
+            await send_email_notification(alert)
+
+    if check_anomaly_for_reading(location.location_id, reading):
+        logger.warning("Anomaly detected — AQI %d for %s.", reading.aqi, location.city)
+        anomaly_alert = await create_alert(
+            session,
+            location_id=location.location_id,
+            alert_type="anomaly_spike",
+            threshold_value=0,
+            actual_aqi=reading.aqi,
+        )
+        if anomaly_alert:
+            await send_email_notification(anomaly_alert)
+
+    await session.commit()
+    asyncio.create_task(bq.stream_reading(reading, location))
 
 
 async def is_outlier(session: AsyncSession, location_id: str, aqi: int) -> bool:
@@ -211,34 +246,7 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
         return None
 
     reading = await save_reading(session, location.location_id, data, weather)
-
-    triggered_rules = await check_threshold_rules(session, location.location_id, reading.aqi)
-    for rule in triggered_rules:
-        alert = await create_alert(
-            session,
-            location_id=location.location_id,
-            alert_type=rule.alert_type,
-            threshold_value=rule.threshold_value,
-            actual_aqi=reading.aqi,
-        )
-        if alert:
-            await send_email_notification(alert)
-
-    if check_anomaly_for_reading(location.location_id, reading):
-        logger.warning("Anomaly detected — AQI %d for %s.", reading.aqi, location.city)
-        anomaly_alert = await create_alert(
-            session,
-            location_id=location.location_id,
-            alert_type="anomaly_spike",
-            threshold_value=0,
-            actual_aqi=reading.aqi,
-        )
-        if anomaly_alert:
-            await send_email_notification(anomaly_alert)
-
-    await session.commit()
-
-    asyncio.create_task(bq.stream_reading(reading, location))
+    await _post_save_pipeline(session, location, reading)
 
     aqi_ingest_total.labels(city=location.city, status="success").inc()
     aqi_ingest_duration_seconds.observe(time.perf_counter() - t0)
@@ -262,3 +270,34 @@ async def fetch_weather(lat: float, lon: float) -> dict:
         response = await client.get(OPENWEATHER_WEATHER_URL, params=params)  # type: ignore[arg-type]
         response.raise_for_status()
         return response.json()
+
+
+async def ingest_location_openaq(session: AsyncSession, location: Location) -> AirQualityReading | None:
+    """Fetch the latest reading from OpenAQ and persist it as a secondary source.
+
+    Uses the same validate → outlier-check → save → alert pipeline as OpenWeather.
+    The unique(location_id, timestamp) constraint silently drops any row whose
+    timestamp already exists (e.g. if both sources report the exact same moment).
+    """
+    from app.services.openaq_client import fetch_latest  # local to avoid import cycle risk
+
+    data = await fetch_latest(location.latitude, location.longitude)
+    if data is None:
+        logger.debug("OpenAQ: no fresh station near %s.", location.city)
+        return None
+
+    if not validate_reading(data):
+        logger.warning("OpenAQ: invalid reading for %s — skipping.", location.city)
+        return None
+
+    aqi = calculate_aqi_from_pm25(data["list"][0]["components"].get("pm2_5", 0.0))
+    if await is_outlier(session, location.location_id, aqi):
+        logger.warning("OpenAQ: outlier AQI %d for %s — skipping.", aqi, location.city)
+        return None
+
+    reading = await save_reading(
+        session, location.location_id, data, data_source="openaq"
+    )
+    await _post_save_pipeline(session, location, reading)
+    logger.info("OpenAQ: ingested AQI %d for %s.", reading.aqi, location.city)
+    return reading

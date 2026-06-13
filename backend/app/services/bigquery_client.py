@@ -72,7 +72,7 @@ def _ensure_sync() -> None:
         client.get_dataset(dataset_ref)
     except Exception:
         ds = bigquery.Dataset(dataset_ref)
-        ds.location = "US"
+        ds.location = settings.bigquery_dataset_location
         client.create_dataset(ds, exists_ok=True)
         logger.info("Created BigQuery dataset %s.%s", project, dataset_id)
 
