@@ -16,6 +16,7 @@ from sqlalchemy import select, text
 from app.api import alerts, analytics, aqi, locations
 from app.config import settings
 from app.database import AsyncSessionLocal, init_db
+from app.services import bigquery_client as bq
 from app.logging_config import configure_logging
 from app.metrics import http_requests_total
 from app.models.alert_rule import AlertRule
@@ -90,6 +91,14 @@ async def lifespan(app: FastAPI):
     _validate_config()
     init_db()
     await _seed_default_alert_rules()
+    if bq.is_enabled():
+        try:
+            await bq.ensure_dataset_and_table()
+            logger.info("BigQuery warehouse ready: %s", bq._table_id())
+        except Exception as exc:
+            logger.error("BigQuery init failed — warehouse tier disabled for this run: %s", exc)
+    else:
+        logger.info("BigQuery not configured (BIGQUERY_PROJECT_ID unset) — using PostgreSQL only.")
     start_scheduler()
     db_host = urlparse(settings.database_url).hostname or "unknown"
     job_names = ",".join(j.id for j in scheduler.get_jobs())

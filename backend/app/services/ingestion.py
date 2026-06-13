@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import uuid
@@ -11,6 +12,7 @@ from app.config import settings
 from app.metrics import aqi_ingest_duration_seconds, aqi_ingest_total
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
+from app.services import bigquery_client as bq
 from app.services.alert_engine import check_threshold_rules, create_alert, send_email_notification
 from app.services.ml_service import check_anomaly_for_reading
 
@@ -204,6 +206,8 @@ async def ingest_location(session: AsyncSession, location: Location) -> AirQuali
             await send_email_notification(anomaly_alert)
 
     await session.commit()
+
+    asyncio.create_task(bq.stream_reading(reading, location))
 
     aqi_ingest_total.labels(city=location.city, status="success").inc()
     aqi_ingest_duration_seconds.observe(time.perf_counter() - t0)

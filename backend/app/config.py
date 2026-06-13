@@ -18,5 +18,10 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     log_format: str = "console"  # set to "json" in production
 
+    # BigQuery — leave empty to disable the warehouse tier
+    bigquery_project_id: str = ""
+    bigquery_dataset_id: str = "aqi_warehouse"
+    bigquery_credentials_json: str = ""  # inline service-account JSON; falls back to ADC
+
 
 settings = Settings()

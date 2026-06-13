@@ -28,6 +28,10 @@ services:
     container_name: aqi_backend
     env_file:
       - .env
+    # To use a GCP key file instead of BIGQUERY_CREDENTIALS_JSON, mount it here:
+    volumes:
+    - ./credentials/bq-key.json:/app/credentials/bq-key.json:ro
+    # and set GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/bq-key.json in .env
     ports:
       - "8000:8000"
     networks:
