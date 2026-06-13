@@ -119,6 +119,7 @@ async def get_pollutants(
 async def get_forecast(
     request: Request,
     city: str = Query(...),
+    days: int = Query(default=1, ge=1, le=7),
     session: AsyncSession = Depends(get_db),
 ):
     location = await _get_location(session, city)
@@ -126,6 +127,6 @@ async def get_forecast(
         select(AQIPrediction)
         .where(AQIPrediction.location_id == location.location_id)
         .order_by(AQIPrediction.forecast_for.asc())
-        .limit(24)
+        .limit(days * 24)
     )
     return result.scalars().all()

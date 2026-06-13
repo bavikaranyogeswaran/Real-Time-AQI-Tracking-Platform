@@ -56,6 +56,20 @@ export interface Forecast {
   model_name: string
 }
 
+export interface ForecastAccuracyRow {
+  forecast_for: string
+  predicted_aqi: number
+  actual_aqi: number
+  error: number
+}
+
+export interface ForecastAccuracy {
+  rows: ForecastAccuracyRow[]
+  mae: number
+  rmse: number
+  sample_count: number
+}
+
 export interface Alert {
   alert_id: string
   location_id: string
@@ -105,8 +119,11 @@ export const getHistory = (city: string, days = 7) =>
 export const getPollutants = (city: string) =>
   api.get<Pollutants>('/api/aqi/pollutants', { params: { city } }).then(r => r.data)
 
-export const getForecast = (city: string) =>
-  api.get<Forecast[]>('/api/aqi/forecast', { params: { city } }).then(r => r.data)
+export const getForecast = (city: string, days = 1) =>
+  api.get<Forecast[]>('/api/aqi/forecast', { params: { city, days } }).then(r => r.data)
+
+export const getForecastAccuracy = (city: string, days = 7) =>
+  api.get<ForecastAccuracy>('/api/analytics/forecast-accuracy', { params: { city, days } }).then(r => r.data)
 
 export const getAlerts = () =>
   api.get<Alert[]>('/api/alerts').then(r => r.data)

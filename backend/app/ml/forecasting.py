@@ -64,8 +64,8 @@ def load_model(location_id: str) -> XGBRegressor:
         return pickle.load(f)
 
 
-def predict_next_24h(location_id: str, df: pd.DataFrame) -> list[dict]:
-    """Recursively forecast AQI for the next 24 hours.
+def predict_next_nh(location_id: str, df: pd.DataFrame, hours: int = 24) -> list[dict]:
+    """Recursively forecast AQI for the next `hours` hours (default 24, max 168).
 
     Uses the last row of df as the starting point. Predicted values feed back
     into lag features for subsequent steps.
@@ -92,22 +92,15 @@ def predict_next_24h(location_id: str, df: pd.DataFrame) -> list[dict]:
     predicted_aqis: list[float] = []
 
     def _lag_aqi(step: int, lag_hours: int) -> float:
-        """Return AQI at (last_ts + step*1h - lag_hours*1h).
-
-        step is 1-indexed (1 = first future hour).
-        If the target time falls within predicted range, use the buffer;
-        otherwise look up the nearest historical reading.
-        """
-        pred_step = step - lag_hours  # which predicted step we need (1-indexed)
+        pred_step = step - lag_hours
         if pred_step >= 1:
             return predicted_aqis[pred_step - 1]
-        # Historical lookup: find reading closest to the target timestamp
         target = last_ts + pd.Timedelta(hours=step - lag_hours)
         deltas = (ts_series - target).abs()
         return float(aqi_series[deltas.idxmin()])
 
     results: list[dict] = []
-    for h in range(1, 25):
+    for h in range(1, hours + 1):
         future_ts = last_ts + pd.Timedelta(hours=h)
 
         features = {

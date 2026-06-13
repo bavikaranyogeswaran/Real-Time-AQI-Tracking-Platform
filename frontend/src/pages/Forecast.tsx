@@ -9,6 +9,7 @@ import {
 export default function Forecast() {
   const [locations, setLocations] = useState<Location[]>([])
   const [city, setCity] = useState('')
+  const [days, setDays] = useState(1)
   const [history, setHistory] = useState<HistoryAQI[]>([])
   const [forecast, setForecast] = useState<ForecastData[]>([])
   const [loading, setLoading] = useState(false)
@@ -23,25 +24,39 @@ export default function Forecast() {
   useEffect(() => {
     if (!city) return
     setLoading(true)
-    Promise.all([getHistory(city, 2), getForecast(city)])
+    Promise.all([getHistory(city, 2), getForecast(city, days)])
       .then(([h, f]) => { setHistory(h); setForecast(f) })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [city])
+  }, [city, days])
 
   return (
     <div className="p-6 flex flex-col gap-6">
       <h1 className="text-xl font-semibold text-gray-800">AQI Forecast</h1>
 
-      <select
-        value={city}
-        onChange={e => setCity(e.target.value)}
-        className="self-start border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
-      >
-        {locations.map(l => (
-          <option key={l.location_id} value={l.city}>{l.city}</option>
-        ))}
-      </select>
+      <div className="flex items-center gap-3 flex-wrap">
+        <select
+          value={city}
+          onChange={e => setCity(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+        >
+          {locations.map(l => (
+            <option key={l.location_id} value={l.city}>{l.city}</option>
+          ))}
+        </select>
+
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+          {([1, 7] as const).map(d => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              className={`px-4 py-2 transition-colors ${days === d ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              {d === 1 ? '24 h' : '7 days'}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {loading ? (
         <ChartSkeleton />
@@ -52,7 +67,7 @@ export default function Forecast() {
               No forecast available yet — the model needs more data. Check back after the next scheduled training run.
             </p>
           )}
-          <ForecastChart history={history} forecast={forecast} />
+          <ForecastChart history={history} forecast={forecast} days={days} />
         </>
       )}
     </div>

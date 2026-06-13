@@ -7,6 +7,7 @@ from sqlalchemy.types import Date
 
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
+from app.models.prediction import AQIPrediction
 from app.services import bigquery_client as bq
 from app.services.ingestion import get_aqi_category
 
@@ -47,6 +48,73 @@ async def get_city_comparison(session: AsyncSession) -> list[dict]:
         except Exception as exc:
             logger.warning("BigQuery city-comparison failed, falling back to PostgreSQL: %s", exc)
     return await _city_comparison_pg(session)
+
+
+async def get_forecast_accuracy(
+    session: AsyncSession,
+    location_id: str,
+    days: int,
+) -> dict:
+    """Compare past predictions against actual readings.
+
+    Predictions are matched to actuals within a ±30-minute tolerance window.
+    Only predictions whose forecast_for timestamp has already passed are included.
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    now = datetime.now(UTC)
+    tolerance = timedelta(minutes=30)
+
+    pred_result = await session.execute(
+        select(AQIPrediction)
+        .where(
+            AQIPrediction.location_id == location_id,
+            AQIPrediction.forecast_for >= cutoff,
+            AQIPrediction.forecast_for <= now,
+        )
+        .order_by(AQIPrediction.forecast_for.asc())
+    )
+    predictions = pred_result.scalars().all()
+
+    if not predictions:
+        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
+
+    actual_result = await session.execute(
+        select(AirQualityReading)
+        .where(
+            AirQualityReading.location_id == location_id,
+            AirQualityReading.timestamp >= cutoff - tolerance,
+            AirQualityReading.timestamp <= now + tolerance,
+        )
+        .order_by(AirQualityReading.timestamp.asc())
+    )
+    actuals = actual_result.scalars().all()
+
+    rows = []
+    for pred in predictions:
+        best = min(
+            (a for a in actuals if abs(a.timestamp - pred.forecast_for) <= tolerance),
+            key=lambda a: abs(a.timestamp - pred.forecast_for),
+            default=None,
+        )
+        if best is not None:
+            error = round(float(pred.predicted_aqi) - float(best.aqi), 2)
+            rows.append(
+                {
+                    "forecast_for": pred.forecast_for,
+                    "predicted_aqi": float(pred.predicted_aqi),
+                    "actual_aqi": best.aqi,
+                    "error": error,
+                }
+            )
+
+    if not rows:
+        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
+
+    errors = [r["error"] for r in rows]
+    mae = round(sum(abs(e) for e in errors) / len(errors), 2)
+    rmse = round((sum(e ** 2 for e in errors) / len(errors)) ** 0.5, 2)
+
+    return {"rows": rows, "mae": mae, "rmse": rmse, "sample_count": len(rows)}
 
 
 async def get_data_gaps(

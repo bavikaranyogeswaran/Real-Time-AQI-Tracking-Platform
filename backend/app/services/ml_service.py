@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ml.anomaly import detect_anomaly
 from app.ml.features import build_feature_df
-from app.ml.forecasting import predict_next_24h
+from app.ml.forecasting import predict_next_nh
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
 from app.models.prediction import AQIPrediction
@@ -18,11 +18,11 @@ _FORECAST_LOOKBACK_DAYS = 7
 
 
 async def run_forecast_for_location(session: AsyncSession, location: Location) -> int:
-    """Generate a fresh 24-hour forecast for the given location.
+    """Generate a fresh 7-day (168-hour) forecast for the given location.
 
     Deletes any existing predictions for the location, fetches the last
     FORECAST_LOOKBACK_DAYS of readings to build features, runs the model,
-    and bulk-inserts 24 new AQIPrediction rows.
+    and bulk-inserts 168 new AQIPrediction rows.
 
     Returns the number of predictions inserted (0 if skipped).
     """
@@ -52,7 +52,7 @@ async def run_forecast_for_location(session: AsyncSession, location: Location) -
         return 0
 
     try:
-        predictions = predict_next_24h(location.location_id, df)
+        predictions = predict_next_nh(location.location_id, df, hours=168)
     except FileNotFoundError:
         logger.debug("No forecast model for %s yet — skipping.", location.city)
         return 0
@@ -60,9 +60,12 @@ async def run_forecast_for_location(session: AsyncSession, location: Location) -
         logger.warning("Forecast failed for %s: %s", location.city, exc)
         return 0
 
-    # Replace stale predictions atomically
+    # Replace only future predictions so past predictions accumulate for accuracy evaluation
     await session.execute(
-        delete(AQIPrediction).where(AQIPrediction.location_id == location.location_id)
+        delete(AQIPrediction).where(
+            AQIPrediction.location_id == location.location_id,
+            AQIPrediction.forecast_for > datetime.now(UTC),
+        )
     )
 
     now = datetime.now(UTC)

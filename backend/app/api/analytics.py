@@ -5,12 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.location import Location
 from app.rate_limit import limiter
-from app.schemas.analytics_schema import CityComparisonOut, GapOut, TrendOut
+from app.schemas.analytics_schema import CityComparisonOut, ForecastAccuracyOut, GapOut, TrendOut
 from app.services.analytics import (
     get_aqi_distribution,
     get_city_comparison,
     get_daily_averages,
     get_data_gaps,
+    get_forecast_accuracy,
     get_hourly_averages,
 )
 
@@ -70,6 +71,18 @@ async def aqi_distribution(
 ):
     location = await _get_location(session, city)
     return await get_aqi_distribution(session, location.location_id)
+
+
+@router.get("/analytics/forecast-accuracy", response_model=ForecastAccuracyOut)
+@limiter.limit("30/minute")
+async def forecast_accuracy_report(
+    request: Request,
+    city: str = Query(...),
+    days: int = Query(default=7, ge=1, le=30),
+    session: AsyncSession = Depends(get_db),
+):
+    location = await _get_location(session, city)
+    return await get_forecast_accuracy(session, location.location_id, days)
 
 
 @router.get("/analytics/gaps", response_model=list[GapOut])

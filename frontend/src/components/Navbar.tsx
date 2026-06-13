@@ -61,6 +61,16 @@ function SunIcon() {
   )
 }
 
+function TargetIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <circle cx="12" cy="12" r="6"/>
+      <circle cx="12" cy="12" r="2"/>
+    </svg>
+  )
+}
+
 function MoonIcon() {
   return (
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -73,6 +83,7 @@ export const NAV_LINKS = [
   { to: '/',           label: 'Map',        end: true,  icon: <MapPinIcon /> },
   { to: '/historical', label: 'Historical', end: false, icon: <BarChartIcon /> },
   { to: '/forecast',   label: 'Forecast',   end: false, icon: <ActivityIcon /> },
+  { to: '/accuracy',   label: 'Accuracy',   end: false, icon: <TargetIcon /> },
   { to: '/alerts',     label: 'Alerts',     end: false, icon: <BellIcon /> },
 ]
 

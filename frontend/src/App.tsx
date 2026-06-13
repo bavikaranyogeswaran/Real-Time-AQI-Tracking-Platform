@@ -5,6 +5,7 @@ import { showToast, ToastContainer } from './components/Toast'
 import Alerts from './pages/Alerts'
 import CityDashboard from './pages/CityDashboard'
 import Forecast from './pages/Forecast'
+import ForecastAccuracy from './pages/ForecastAccuracy'
 import Historical from './pages/Historical'
 import Home from './pages/Home'
 import { getAlerts } from './services/api'
@@ -69,6 +70,7 @@ function AppShell() {
               <Route path="/city/:city" element={<CityDashboard />} />
               <Route path="/historical" element={<Historical />} />
               <Route path="/forecast" element={<Forecast />} />
+              <Route path="/accuracy" element={<ForecastAccuracy />} />
               <Route path="/alerts" element={<Alerts />} />
             </Routes>
           </div>
