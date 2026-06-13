@@ -5,7 +5,7 @@ import { CardSkeleton, ChartSkeleton } from '../components/LoadingSkeleton'
 import PollutantChart from '../components/PollutantChart'
 import TrendChart from '../components/TrendChart'
 import {
-  getCurrentAQI, getPollutants, getTrends,
+  getCurrentAQI, getPollutants, getTrends, downloadCityPdf,
   type CurrentAQI, type Pollutants, type Trend,
 } from '../services/api'
 import { getAQIColor } from '../utils/aqiColors'
@@ -68,6 +68,7 @@ export default function CityDashboard() {
   const [trends, setTrends] = useState<Trend[]>([])
   const [error, setError] = useState(false)
   const [retryKey, setRetryKey] = useState(0)
+  const [downloading, setDownloading] = useState(false)
 
   useEffect(() => {
     if (!city) return
@@ -90,6 +91,18 @@ export default function CityDashboard() {
   function retry() {
     setError(false)
     setRetryKey(k => k + 1)
+  }
+
+  async function handleDownloadReport() {
+    if (!city) return
+    setDownloading(true)
+    try {
+      await downloadCityPdf(city, 7)
+    } catch {
+      // silently fail — user still sees the page
+    } finally {
+      setDownloading(false)
+    }
   }
 
   if (error) {
@@ -144,6 +157,13 @@ export default function CityDashboard() {
       <div className="flex items-center gap-3">
         <Link to="/" className="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)]">← Map</Link>
         <h1 className="text-xl font-semibold text-[var(--text-primary)]">{city}</h1>
+        <button
+          onClick={handleDownloadReport}
+          disabled={downloading}
+          className="ml-auto px-3 py-1.5 rounded-lg border border-[var(--surface-border)] text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] disabled:opacity-50 transition-colors"
+        >
+          {downloading ? 'Generating…' : 'Download Report'}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

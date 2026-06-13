@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import _rate_limit_exceeded_handler
 from sqlalchemy import select, text
 
-from app.api import alerts, analytics, aqi, locations
+from app.api import admin, alerts, analytics, aqi, locations, reports
 from app.config import settings
 from app.database import AsyncSessionLocal, init_db
 from app.services import bigquery_client as bq
@@ -156,6 +156,8 @@ app.include_router(locations.router, prefix="/api", tags=["Locations"])
 app.include_router(aqi.router, prefix="/api", tags=["AQI"])
 app.include_router(alerts.router, prefix="/api", tags=["Alerts"])
 app.include_router(analytics.router, prefix="/api", tags=["Analytics"])
+app.include_router(admin.router, prefix="/api", tags=["Admin"])
+app.include_router(reports.router, prefix="/api", tags=["Reports"])
 
 
 @app.get("/metrics", include_in_schema=False)

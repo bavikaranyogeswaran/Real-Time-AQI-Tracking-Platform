@@ -5,8 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.location import Location
 from app.rate_limit import limiter
+from app.schemas.alert_performance_schema import AlertPerformanceOut
 from app.schemas.analytics_schema import CityComparisonOut, ForecastAccuracyOut, GapOut, TrendOut
 from app.services.analytics import (
+    get_alert_performance,
     get_aqi_distribution,
     get_city_comparison,
     get_daily_averages,
@@ -83,6 +85,16 @@ async def forecast_accuracy_report(
 ):
     location = await _get_location(session, city)
     return await get_forecast_accuracy(session, location.location_id, days)
+
+
+@router.get("/analytics/alert-performance", response_model=AlertPerformanceOut)
+@limiter.limit("20/minute")
+async def alert_performance(
+    request: Request,
+    days: int = Query(default=30, ge=1, le=365),
+    session: AsyncSession = Depends(get_db),
+):
+    return await get_alert_performance(session, days)
 
 
 @router.get("/analytics/gaps", response_model=list[GapOut])

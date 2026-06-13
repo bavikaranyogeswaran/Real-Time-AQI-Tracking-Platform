@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import Navbar, { Logo, NAV_LINKS } from './components/Navbar'
 import { showToast, ToastContainer } from './components/Toast'
+import AdminDashboard from './pages/AdminDashboard'
+import AlertPerformance from './pages/AlertPerformance'
 import Alerts from './pages/Alerts'
 import CityDashboard from './pages/CityDashboard'
 import Forecast from './pages/Forecast'
@@ -72,6 +74,8 @@ function AppShell() {
               <Route path="/forecast" element={<Forecast />} />
               <Route path="/accuracy" element={<ForecastAccuracy />} />
               <Route path="/alerts" element={<Alerts />} />
+              <Route path="/alert-performance" element={<AlertPerformance />} />
+              <Route path="/admin" element={<AdminDashboard />} />
             </Routes>
           </div>
         </main>

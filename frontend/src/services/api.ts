@@ -70,6 +70,49 @@ export interface ForecastAccuracy {
   sample_count: number
 }
 
+export interface CityStatus {
+  city: string
+  country: string
+  latest_aqi: number | null
+  last_reading_at: string | null
+  reading_count_7d: number
+  data_source: string | null
+}
+
+export interface AdminSummary {
+  total_readings: number
+  readings_by_source: Record<string, number>
+  alerts_active: number
+  alerts_total_7d: number
+  cities_monitored: number
+  city_status: CityStatus[]
+}
+
+export interface AlertByType {
+  alert_type: string
+  count: number
+  avg_aqi: number
+}
+
+export interface AlertByCity {
+  city: string
+  count: number
+}
+
+export interface AlertDailyCount {
+  date: string
+  count: number
+}
+
+export interface AlertPerformance {
+  total: number
+  active: number
+  resolved: number
+  by_type: AlertByType[]
+  by_city: AlertByCity[]
+  daily_counts: AlertDailyCount[]
+}
+
 export interface Alert {
   alert_id: string
   location_id: string
@@ -124,6 +167,26 @@ export const getForecast = (city: string, days = 1) =>
 
 export const getForecastAccuracy = (city: string, days = 7) =>
   api.get<ForecastAccuracy>('/api/analytics/forecast-accuracy', { params: { city, days } }).then(r => r.data)
+
+export const getAdminSummary = () =>
+  api.get<AdminSummary>('/api/admin/summary').then(r => r.data)
+
+export const getAlertPerformance = (days = 30) =>
+  api.get<AlertPerformance>('/api/analytics/alert-performance', { params: { days } }).then(r => r.data)
+
+export const downloadCityPdf = (city: string, days = 7): Promise<void> =>
+  api
+    .get('/api/reports/city-pdf', { params: { city, days }, responseType: 'blob' })
+    .then(r => {
+      const url = URL.createObjectURL(new Blob([r.data], { type: 'application/pdf' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${city.toLowerCase().replace(/\s+/g, '-')}-aqi-report.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    })
 
 export const getAlerts = () =>
   api.get<Alert[]>('/api/alerts').then(r => r.data)

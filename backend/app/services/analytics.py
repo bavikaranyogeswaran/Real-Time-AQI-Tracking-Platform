@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Date
 
 from app.models.air_quality import AirQualityReading
+from app.models.alert import Alert
 from app.models.location import Location
 from app.models.prediction import AQIPrediction
 from app.services import bigquery_client as bq
@@ -338,6 +339,72 @@ async def _aqi_distribution_bq(location_id: str) -> list[dict]:
     """
     rows = await bq.run_query(sql, [bq.str_param("location_id", location_id)])
     return [{"category": row["category"], "count": int(row["count"])} for row in rows]
+
+
+async def get_alert_performance(session: AsyncSession, days: int) -> dict:
+    """Return alert counts by type, city, and day over the last `days` days."""
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+
+    total = await session.scalar(
+        select(func.count()).where(Alert.created_at >= cutoff)
+    ) or 0
+
+    active = await session.scalar(
+        select(func.count()).where(Alert.created_at >= cutoff, Alert.status == "active")
+    ) or 0
+
+    resolved = await session.scalar(
+        select(func.count()).where(Alert.created_at >= cutoff, Alert.status == "resolved")
+    ) or 0
+
+    by_type_rows = (
+        await session.execute(
+            select(
+                Alert.alert_type,
+                func.count().label("count"),
+                func.avg(Alert.actual_aqi).label("avg_aqi"),
+            )
+            .where(Alert.created_at >= cutoff)
+            .group_by(Alert.alert_type)
+            .order_by(func.count().desc())
+        )
+    ).all()
+    by_type = [
+        {"alert_type": r.alert_type, "count": r.count, "avg_aqi": round(float(r.avg_aqi), 1)}
+        for r in by_type_rows
+    ]
+
+    by_city_rows = (
+        await session.execute(
+            select(Location.city, func.count().label("count"))
+            .join(Alert, Alert.location_id == Location.location_id)
+            .where(Alert.created_at >= cutoff)
+            .group_by(Location.city)
+            .order_by(func.count().desc())
+            .limit(10)
+        )
+    ).all()
+    by_city = [{"city": r.city, "count": r.count} for r in by_city_rows]
+
+    date_col = cast(Alert.created_at, Date).label("date")
+    daily_rows = (
+        await session.execute(
+            select(date_col, func.count().label("count"))
+            .where(Alert.created_at >= cutoff)
+            .group_by(date_col)
+            .order_by(date_col.asc())
+        )
+    ).all()
+    daily_counts = [{"date": r.date, "count": r.count} for r in daily_rows]
+
+    return {
+        "total": total,
+        "active": active,
+        "resolved": resolved,
+        "by_type": by_type,
+        "by_city": by_city,
+        "daily_counts": daily_counts,
+    }
 
 
 async def _city_comparison_bq() -> list[dict]:
