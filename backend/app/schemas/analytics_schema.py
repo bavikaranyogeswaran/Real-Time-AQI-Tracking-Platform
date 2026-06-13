@@ -48,3 +48,25 @@ class TrendOut(BaseModel):
     max_aqi: int
 
     model_config = {"from_attributes": True}
+
+
+class PollutantTrendOut(BaseModel):
+    date: date
+    avg_pm25: float | None
+    avg_pm10: float | None
+    avg_co: float | None
+    avg_no2: float | None
+    avg_so2: float | None
+    avg_o3: float | None
+
+    model_config = {"from_attributes": True}
+
+
+class DominantPollutantOut(BaseModel):
+    pollutant: str
+    label: str
+    avg_value: float
+    safe_limit: float
+    exceedance_count: int
+
+    model_config = {"from_attributes": True}

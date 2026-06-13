@@ -6,15 +6,17 @@ from app.database import get_db
 from app.models.location import Location
 from app.rate_limit import limiter
 from app.schemas.alert_performance_schema import AlertPerformanceOut
-from app.schemas.analytics_schema import CityComparisonOut, ForecastAccuracyOut, GapOut, TrendOut
+from app.schemas.analytics_schema import CityComparisonOut, DominantPollutantOut, ForecastAccuracyOut, GapOut, PollutantTrendOut, TrendOut
 from app.services.analytics import (
     get_alert_performance,
     get_aqi_distribution,
     get_city_comparison,
     get_daily_averages,
     get_data_gaps,
+    get_dominant_pollutant,
     get_forecast_accuracy,
     get_hourly_averages,
+    get_pollutant_trends,
 )
 
 router = APIRouter()
@@ -95,6 +97,35 @@ async def alert_performance(
     session: AsyncSession = Depends(get_db),
 ):
     return await get_alert_performance(session, days)
+
+
+@router.get("/analytics/pollutant-trends", response_model=list[PollutantTrendOut])
+@limiter.limit("30/minute")
+async def pollutant_trends(
+    request: Request,
+    city: str = Query(...),
+    period: str = Query(default="weekly"),
+    session: AsyncSession = Depends(get_db),
+):
+    if period not in _PERIOD_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid period '{period}'. Choose from: {', '.join(_PERIOD_DAYS)}",
+        )
+    location = await _get_location(session, city)
+    return await get_pollutant_trends(session, location.location_id, _PERIOD_DAYS[period])
+
+
+@router.get("/analytics/dominant-pollutant", response_model=list[DominantPollutantOut])
+@limiter.limit("30/minute")
+async def dominant_pollutant(
+    request: Request,
+    city: str = Query(...),
+    days: int = Query(default=7, ge=1, le=90),
+    session: AsyncSession = Depends(get_db),
+):
+    location = await _get_location(session, city)
+    return await get_dominant_pollutant(session, location.location_id, days)
 
 
 @router.get("/analytics/gaps", response_model=list[GapOut])

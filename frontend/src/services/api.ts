@@ -150,6 +150,24 @@ export interface AQIDistribution {
   count: number
 }
 
+export interface PollutantTrend {
+  date: string
+  avg_pm25: number | null
+  avg_pm10: number | null
+  avg_co: number | null
+  avg_no2: number | null
+  avg_so2: number | null
+  avg_o3: number | null
+}
+
+export interface DominantPollutant {
+  pollutant: string
+  label: string
+  avg_value: number
+  safe_limit: number
+  exceedance_count: number
+}
+
 export const getLocations = () =>
   api.get<Location[]>('/api/locations').then(r => r.data)
 
@@ -202,3 +220,9 @@ export const getPeakHours = (city: string) =>
 
 export const getDistribution = (city: string) =>
   api.get<AQIDistribution[]>('/api/analytics/distribution', { params: { city } }).then(r => r.data)
+
+export const getPollutantTrends = (city: string, period = 'weekly') =>
+  api.get<PollutantTrend[]>('/api/analytics/pollutant-trends', { params: { city, period } }).then(r => r.data)
+
+export const getDominantPollutant = (city: string, days = 7) =>
+  api.get<DominantPollutant[]>('/api/analytics/dominant-pollutant', { params: { city, days } }).then(r => r.data)

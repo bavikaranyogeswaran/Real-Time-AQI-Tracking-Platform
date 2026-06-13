@@ -130,6 +130,30 @@ async def get_forecast_accuracy(
     return {"rows": rows, "mae": mae, "rmse": rmse, "sample_count": len(rows)}
 
 
+async def get_pollutant_trends(session: AsyncSession, location_id: str, days: int) -> list[dict]:
+    if bq.is_enabled():
+        try:
+            result = await _pollutant_trends_bq(location_id, days)
+            if result:
+                return result
+            logger.warning("BigQuery pollutant-trends returned empty, falling back to PostgreSQL")
+        except Exception as exc:
+            logger.warning("BigQuery pollutant-trends failed, falling back to PostgreSQL: %s", exc)
+    return await _pollutant_trends_pg(session, location_id, days)
+
+
+async def get_dominant_pollutant(session: AsyncSession, location_id: str, days: int) -> list[dict]:
+    if bq.is_enabled():
+        try:
+            result = await _dominant_pollutant_bq(location_id, days)
+            if result:
+                return result
+            logger.warning("BigQuery dominant-pollutant returned empty, falling back to PostgreSQL")
+        except Exception as exc:
+            logger.warning("BigQuery dominant-pollutant failed, falling back to PostgreSQL: %s", exc)
+    return await _dominant_pollutant_pg(session, location_id, days)
+
+
 async def get_data_gaps(
     session: AsyncSession,
     location_id: str,
@@ -417,6 +441,173 @@ async def get_alert_performance(session: AsyncSession, days: int) -> dict:
         "by_city": by_city,
         "daily_counts": daily_counts,
     }
+
+
+async def _pollutant_trends_pg(session: AsyncSession, location_id: str, days: int) -> list[dict]:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    date_col = cast(AirQualityReading.timestamp, Date).label("date")
+    result = await session.execute(
+        select(
+            date_col,
+            func.avg(AirQualityReading.pm25).label("avg_pm25"),
+            func.avg(AirQualityReading.pm10).label("avg_pm10"),
+            func.avg(AirQualityReading.co).label("avg_co"),
+            func.avg(AirQualityReading.no2).label("avg_no2"),
+            func.avg(AirQualityReading.so2).label("avg_so2"),
+            func.avg(AirQualityReading.o3).label("avg_o3"),
+        )
+        .where(
+            AirQualityReading.location_id == location_id,
+            AirQualityReading.timestamp >= cutoff,
+        )
+        .group_by(date_col)
+        .order_by(date_col.asc())
+    )
+    return [
+        {
+            "date": row.date,
+            "avg_pm25": round(float(row.avg_pm25), 2) if row.avg_pm25 is not None else None,
+            "avg_pm10": round(float(row.avg_pm10), 2) if row.avg_pm10 is not None else None,
+            "avg_co": round(float(row.avg_co), 2) if row.avg_co is not None else None,
+            "avg_no2": round(float(row.avg_no2), 2) if row.avg_no2 is not None else None,
+            "avg_so2": round(float(row.avg_so2), 2) if row.avg_so2 is not None else None,
+            "avg_o3": round(float(row.avg_o3), 2) if row.avg_o3 is not None else None,
+        }
+        for row in result.all()
+    ]
+
+
+# WHO 24-hour guideline limits (μg/m³) used for exceedance counting
+_WHO_LIMITS: list[tuple[str, str, float]] = [
+    ("pm25", "PM2.5", 15.0),
+    ("pm10", "PM10",  45.0),
+    ("co",   "CO",    4000.0),
+    ("no2",  "NO₂",  25.0),
+    ("so2",  "SO₂",  40.0),
+    ("o3",   "O₃",   100.0),
+]
+
+
+async def _dominant_pollutant_pg(session: AsyncSession, location_id: str, days: int) -> list[dict]:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    col = AirQualityReading
+    result = await session.execute(
+        select(
+            func.avg(col.pm25).label("avg_pm25"),
+            func.count().filter(col.pm25 > 15).label("exc_pm25"),
+            func.avg(col.pm10).label("avg_pm10"),
+            func.count().filter(col.pm10 > 45).label("exc_pm10"),
+            func.avg(col.co).label("avg_co"),
+            func.count().filter(col.co > 4000).label("exc_co"),
+            func.avg(col.no2).label("avg_no2"),
+            func.count().filter(col.no2 > 25).label("exc_no2"),
+            func.avg(col.so2).label("avg_so2"),
+            func.count().filter(col.so2 > 40).label("exc_so2"),
+            func.avg(col.o3).label("avg_o3"),
+            func.count().filter(col.o3 > 100).label("exc_o3"),
+        )
+        .where(col.location_id == location_id, col.timestamp >= cutoff)
+    )
+    row = result.one()
+    raw = [
+        ("pm25", float(row.avg_pm25 or 0), row.exc_pm25),
+        ("pm10", float(row.avg_pm10 or 0), row.exc_pm10),
+        ("co",   float(row.avg_co   or 0), row.exc_co),
+        ("no2",  float(row.avg_no2  or 0), row.exc_no2),
+        ("so2",  float(row.avg_so2  or 0), row.exc_so2),
+        ("o3",   float(row.avg_o3   or 0), row.exc_o3),
+    ]
+    limit_map = {key: (label, limit) for key, label, limit in _WHO_LIMITS}
+    data = [
+        {
+            "pollutant": key,
+            "label": limit_map[key][0],
+            "avg_value": round(avg, 2),
+            "safe_limit": limit_map[key][1],
+            "exceedance_count": exc,
+        }
+        for key, avg, exc in raw
+    ]
+    return sorted(data, key=lambda x: x["exceedance_count"], reverse=True)
+
+
+async def _pollutant_trends_bq(location_id: str, days: int) -> list[dict]:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    table = bq._table_id()
+    sql = f"""
+        SELECT
+            DATE(timestamp) AS date,
+            ROUND(AVG(pm25), 2) AS avg_pm25,
+            ROUND(AVG(pm10), 2) AS avg_pm10,
+            ROUND(AVG(co),   2) AS avg_co,
+            ROUND(AVG(no2),  2) AS avg_no2,
+            ROUND(AVG(so2),  2) AS avg_so2,
+            ROUND(AVG(o3),   2) AS avg_o3
+        FROM `{table}`
+        WHERE location_id = @location_id
+          AND timestamp >= @cutoff
+        GROUP BY date
+        ORDER BY date ASC
+    """
+    rows = await bq.run_query(
+        sql,
+        [bq.str_param("location_id", location_id), bq.ts_param("cutoff", cutoff)],
+    )
+    return [
+        {
+            "date": row["date"],
+            "avg_pm25": float(row["avg_pm25"]) if row["avg_pm25"] is not None else None,
+            "avg_pm10": float(row["avg_pm10"]) if row["avg_pm10"] is not None else None,
+            "avg_co":   float(row["avg_co"])   if row["avg_co"]   is not None else None,
+            "avg_no2":  float(row["avg_no2"])  if row["avg_no2"]  is not None else None,
+            "avg_so2":  float(row["avg_so2"])  if row["avg_so2"]  is not None else None,
+            "avg_o3":   float(row["avg_o3"])   if row["avg_o3"]   is not None else None,
+        }
+        for row in rows
+    ]
+
+
+async def _dominant_pollutant_bq(location_id: str, days: int) -> list[dict]:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    table = bq._table_id()
+    sql = f"""
+        SELECT pollutant, label, avg_value, safe_limit, exceedance_count FROM (
+            SELECT 'pm25' AS pollutant, 'PM2.5' AS label,
+                   ROUND(AVG(pm25), 2) AS avg_value, 15.0 AS safe_limit,
+                   COUNTIF(pm25 > 15) AS exceedance_count
+            FROM `{table}` WHERE location_id = @location_id AND timestamp >= @cutoff AND pm25 IS NOT NULL
+            UNION ALL
+            SELECT 'pm10', 'PM10', ROUND(AVG(pm10), 2), 45.0, COUNTIF(pm10 > 45)
+            FROM `{table}` WHERE location_id = @location_id AND timestamp >= @cutoff AND pm10 IS NOT NULL
+            UNION ALL
+            SELECT 'co', 'CO', ROUND(AVG(co), 2), 4000.0, COUNTIF(co > 4000)
+            FROM `{table}` WHERE location_id = @location_id AND timestamp >= @cutoff AND co IS NOT NULL
+            UNION ALL
+            SELECT 'no2', 'NO₂', ROUND(AVG(no2), 2), 25.0, COUNTIF(no2 > 25)
+            FROM `{table}` WHERE location_id = @location_id AND timestamp >= @cutoff AND no2 IS NOT NULL
+            UNION ALL
+            SELECT 'so2', 'SO₂', ROUND(AVG(so2), 2), 40.0, COUNTIF(so2 > 40)
+            FROM `{table}` WHERE location_id = @location_id AND timestamp >= @cutoff AND so2 IS NOT NULL
+            UNION ALL
+            SELECT 'o3', 'O₃', ROUND(AVG(o3), 2), 100.0, COUNTIF(o3 > 100)
+            FROM `{table}` WHERE location_id = @location_id AND timestamp >= @cutoff AND o3 IS NOT NULL
+        )
+        ORDER BY exceedance_count DESC
+    """
+    rows = await bq.run_query(
+        sql,
+        [bq.str_param("location_id", location_id), bq.ts_param("cutoff", cutoff)],
+    )
+    return [
+        {
+            "pollutant": row["pollutant"],
+            "label": row["label"],
+            "avg_value": float(row["avg_value"]),
+            "safe_limit": float(row["safe_limit"]),
+            "exceedance_count": int(row["exceedance_count"]),
+        }
+        for row in rows
+    ]
 
 
 async def _city_comparison_bq() -> list[dict]:
