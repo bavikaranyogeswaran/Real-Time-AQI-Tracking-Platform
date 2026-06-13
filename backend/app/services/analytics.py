@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 async def get_daily_averages(session: AsyncSession, location_id: str, days: int) -> list[dict]:
     if bq.is_enabled():
         try:
-            return await _daily_averages_bq(location_id, days)
+            result = await _daily_averages_bq(location_id, days)
+            if result:
+                return result
+            logger.warning("BigQuery daily-averages returned empty, falling back to PostgreSQL")
         except Exception as exc:
             logger.warning("BigQuery daily-averages failed, falling back to PostgreSQL: %s", exc)
     return await _daily_averages_pg(session, location_id, days)
@@ -27,7 +30,10 @@ async def get_daily_averages(session: AsyncSession, location_id: str, days: int)
 async def get_hourly_averages(session: AsyncSession, location_id: str) -> list[dict]:
     if bq.is_enabled():
         try:
-            return await _hourly_averages_bq(location_id)
+            result = await _hourly_averages_bq(location_id)
+            if result:
+                return result
+            logger.warning("BigQuery hourly-averages returned empty, falling back to PostgreSQL")
         except Exception as exc:
             logger.warning("BigQuery hourly-averages failed, falling back to PostgreSQL: %s", exc)
     return await _hourly_averages_pg(session, location_id)
@@ -36,7 +42,10 @@ async def get_hourly_averages(session: AsyncSession, location_id: str) -> list[d
 async def get_aqi_distribution(session: AsyncSession, location_id: str) -> list[dict]:
     if bq.is_enabled():
         try:
-            return await _aqi_distribution_bq(location_id)
+            result = await _aqi_distribution_bq(location_id)
+            if result:
+                return result
+            logger.warning("BigQuery distribution returned empty, falling back to PostgreSQL")
         except Exception as exc:
             logger.warning("BigQuery distribution failed, falling back to PostgreSQL: %s", exc)
     return await _aqi_distribution_pg(session, location_id)
@@ -45,7 +54,10 @@ async def get_aqi_distribution(session: AsyncSession, location_id: str) -> list[
 async def get_city_comparison(session: AsyncSession) -> list[dict]:
     if bq.is_enabled():
         try:
-            return await _city_comparison_bq()
+            result = await _city_comparison_bq()
+            if result:
+                return result
+            logger.warning("BigQuery city-comparison returned empty, falling back to PostgreSQL")
         except Exception as exc:
             logger.warning("BigQuery city-comparison failed, falling back to PostgreSQL: %s", exc)
     return await _city_comparison_pg(session)
