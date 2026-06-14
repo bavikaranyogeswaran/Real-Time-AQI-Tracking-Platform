@@ -82,3 +82,25 @@ class CityRankingOut(BaseModel):
     trend: str  # "improving" | "worsening" | "stable"
 
     model_config = {"from_attributes": True}
+
+
+class DayOfWeekPatternOut(BaseModel):
+    day_of_week: int   # 0=Monday ... 6=Sunday
+    day_label: str
+    avg_aqi: float
+    min_aqi: int
+    max_aqi: int
+    reading_count: int
+
+    model_config = {"from_attributes": True}
+
+
+class MonthlyPatternOut(BaseModel):
+    month: int         # 1-12
+    month_label: str
+    avg_aqi: float
+    min_aqi: int
+    max_aqi: int
+    reading_count: int
+
+    model_config = {"from_attributes": True}

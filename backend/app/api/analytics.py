@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models.location import Location
 from app.rate_limit import limiter
 from app.schemas.alert_performance_schema import AlertPerformanceOut
-from app.schemas.analytics_schema import CityComparisonOut, CityRankingOut, DominantPollutantOut, ForecastAccuracyOut, GapOut, PollutantTrendOut, TrendOut
+from app.schemas.analytics_schema import CityComparisonOut, CityRankingOut, DayOfWeekPatternOut, DominantPollutantOut, ForecastAccuracyOut, GapOut, MonthlyPatternOut, PollutantTrendOut, TrendOut
 from app.services import bigquery_client as bq
 from app.services.analytics import (
     get_alert_performance,
@@ -15,9 +15,11 @@ from app.services.analytics import (
     get_city_ranking,
     get_daily_averages,
     get_data_gaps,
+    get_day_of_week_pattern,
     get_dominant_pollutant,
     get_forecast_accuracy,
     get_hourly_averages,
+    get_monthly_pattern,
     get_pollutant_trends,
 )
 
@@ -86,6 +88,30 @@ async def peak_hours(
 ):
     location = await _get_location(session, city)
     return await get_hourly_averages(location.location_id)
+
+
+@router.get("/analytics/day-of-week", response_model=list[DayOfWeekPatternOut])
+@limiter.limit("30/minute")
+async def day_of_week_pattern(
+    request: Request,
+    city: str = Query(...),
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
+):
+    location = await _get_location(session, city)
+    return await get_day_of_week_pattern(location.location_id)
+
+
+@router.get("/analytics/monthly-pattern", response_model=list[MonthlyPatternOut])
+@limiter.limit("30/minute")
+async def monthly_pattern(
+    request: Request,
+    city: str = Query(...),
+    session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
+):
+    location = await _get_location(session, city)
+    return await get_monthly_pattern(location.location_id)
 
 
 @router.get("/analytics/distribution")

@@ -1,6 +1,12 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
+_DOW_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+_MONTH_LABELS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
 from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Date
@@ -44,6 +50,14 @@ async def get_pollutant_trends(location_id: str, days: int) -> list[dict]:
 
 async def get_dominant_pollutant(location_id: str, days: int) -> list[dict]:
     return await _dominant_pollutant_bq(location_id, days)
+
+
+async def get_day_of_week_pattern(location_id: str) -> list[dict]:
+    return await _day_of_week_pattern_bq(location_id)
+
+
+async def get_monthly_pattern(location_id: str) -> list[dict]:
+    return await _monthly_pattern_bq(location_id)
 
 
 async def get_data_gaps(
@@ -421,6 +435,63 @@ async def _dominant_pollutant_bq(location_id: str, days: int) -> list[dict]:
             "avg_value": float(row["avg_value"]),
             "safe_limit": float(row["safe_limit"]),
             "exceedance_count": int(row["exceedance_count"]),
+        }
+        for row in rows
+    ]
+
+
+async def _day_of_week_pattern_bq(location_id: str) -> list[dict]:
+    mv = bq._mv_daily_id()
+    sql = f"""
+        SELECT
+          EXTRACT(DAYOFWEEK FROM date) AS bq_dow,
+          AVG(avg_aqi)       AS avg_aqi,
+          MIN(min_aqi)       AS min_aqi,
+          MAX(max_aqi)       AS max_aqi,
+          SUM(reading_count) AS reading_count
+        FROM `{mv}`
+        WHERE location_id = @location_id
+        GROUP BY bq_dow
+        ORDER BY bq_dow ASC
+    """
+    rows = await bq.run_query(sql, [bq.str_param("location_id", location_id)])
+    return [
+        {
+            # BQ: 1=Sun, 2=Mon, ..., 7=Sat → remap to 0=Mon ... 6=Sun
+            "day_of_week": (int(row["bq_dow"]) + 5) % 7,
+            "day_label": _DOW_LABELS[(int(row["bq_dow"]) + 5) % 7],
+            "avg_aqi": round(float(row["avg_aqi"]), 1),
+            "min_aqi": int(row["min_aqi"]),
+            "max_aqi": int(row["max_aqi"]),
+            "reading_count": int(row["reading_count"]),
+        }
+        for row in rows
+    ]
+
+
+async def _monthly_pattern_bq(location_id: str) -> list[dict]:
+    mv = bq._mv_daily_id()
+    sql = f"""
+        SELECT
+          EXTRACT(MONTH FROM date) AS month,
+          AVG(avg_aqi)       AS avg_aqi,
+          MIN(min_aqi)       AS min_aqi,
+          MAX(max_aqi)       AS max_aqi,
+          SUM(reading_count) AS reading_count
+        FROM `{mv}`
+        WHERE location_id = @location_id
+        GROUP BY month
+        ORDER BY month ASC
+    """
+    rows = await bq.run_query(sql, [bq.str_param("location_id", location_id)])
+    return [
+        {
+            "month": int(row["month"]),
+            "month_label": _MONTH_LABELS[int(row["month"]) - 1],
+            "avg_aqi": round(float(row["avg_aqi"]), 1),
+            "min_aqi": int(row["min_aqi"]),
+            "max_aqi": int(row["max_aqi"]),
+            "reading_count": int(row["reading_count"]),
         }
         for row in rows
     ]

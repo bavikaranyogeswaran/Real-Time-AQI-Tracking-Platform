@@ -3,8 +3,8 @@ import { ChartSkeleton, StatSkeleton } from '../components/LoadingSkeleton'
 import PollutantTrendChart from '../components/PollutantTrendChart'
 import TrendChart from '../components/TrendChart'
 import {
-  getDominantPollutant, getLocations, getPollutantTrends, getTrends,
-  type DominantPollutant, type Location, type PollutantTrend, type Trend,
+  getDayOfWeekPattern, getDominantPollutant, getLocations, getMonthlyPattern, getPollutantTrends, getTrends,
+  type DayOfWeekPattern, type DominantPollutant, type Location, type MonthlyPattern, type PollutantTrend, type Trend,
 } from '../services/api'
 
 const PERIODS = [
@@ -22,6 +22,8 @@ export default function Historical() {
   const [compareTrends, setCompareTrends] = useState<Trend[]>([])
   const [pollutantTrends, setPollutantTrends] = useState<PollutantTrend[]>([])
   const [dominantPollutants, setDominantPollutants] = useState<DominantPollutant[]>([])
+  const [dowPattern, setDowPattern] = useState<DayOfWeekPattern[]>([])
+  const [monthlyPattern, setMonthlyPattern] = useState<MonthlyPattern[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -48,6 +50,17 @@ export default function Historical() {
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [city, period])
+
+  useEffect(() => {
+    if (!city) return
+    Promise.all([getDayOfWeekPattern(city), getMonthlyPattern(city)])
+      .then(([dow, monthly]) => {
+        setDowPattern(dow)
+        setMonthlyPattern(monthly)
+      })
+      .catch(console.error)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [city])
 
   useEffect(() => {
     if (!compareCity) { setCompareTrends([]); return }
@@ -164,8 +177,82 @@ export default function Historical() {
               </div>
             </div>
           )}
+
+          {(dowPattern.length > 0 || monthlyPattern.length > 0) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {dowPattern.length > 0 && (
+                <PatternBars
+                  title={`Day-of-Week Pattern — ${city}`}
+                  subtitle="All-time average AQI by weekday"
+                  rows={dowPattern.map(r => ({ label: r.day_label.slice(0, 3), avg_aqi: r.avg_aqi, min_aqi: r.min_aqi, max_aqi: r.max_aqi }))}
+                />
+              )}
+              {monthlyPattern.length > 0 && (
+                <PatternBars
+                  title={`Seasonal Pattern — ${city}`}
+                  subtitle="All-time average AQI by month"
+                  rows={monthlyPattern.map(r => ({ label: r.month_label.slice(0, 3), avg_aqi: r.avg_aqi, min_aqi: r.min_aqi, max_aqi: r.max_aqi }))}
+                />
+              )}
+            </div>
+          )}
         </>
       )}
+    </div>
+  )
+}
+
+function aqiColor(aqi: number): string {
+  if (aqi <= 50)  return '#22c55e'
+  if (aqi <= 100) return '#eab308'
+  if (aqi <= 150) return '#f97316'
+  if (aqi <= 200) return '#ef4444'
+  if (aqi <= 300) return '#a855f7'
+  return '#7f1d1d'
+}
+
+function PatternBars({
+  title, subtitle, rows,
+}: {
+  title: string
+  subtitle: string
+  rows: { label: string; avg_aqi: number; min_aqi: number; max_aqi: number }[]
+}) {
+  const peak = Math.max(...rows.map(r => r.avg_aqi), 1)
+  return (
+    <div className="bg-[var(--surface-card)] rounded-xl border border-[var(--surface-border)] p-6">
+      <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">{title}</p>
+      <p className="text-xs text-[var(--text-muted)] mb-5">{subtitle}</p>
+      <div className="flex items-end gap-2 h-36">
+        {rows.map(r => {
+          const heightPct = (r.avg_aqi / peak) * 100
+          const color = aqiColor(r.avg_aqi)
+          return (
+            <div key={r.label} className="flex-1 flex flex-col items-center gap-1 group relative">
+              <div className="absolute bottom-full mb-1 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
+                <div className="bg-[var(--surface-card)] border border-[var(--surface-border)] rounded px-2 py-1 text-xs text-[var(--text-secondary)] whitespace-nowrap shadow-sm">
+                  avg {r.avg_aqi} · {r.min_aqi}–{r.max_aqi}
+                </div>
+              </div>
+              <div className="w-full rounded-t-sm transition-all" style={{ height: `${heightPct}%`, background: color, minHeight: 4 }} />
+              <span className="text-[10px] text-[var(--text-muted)]">{r.label}</span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-3 flex gap-3 flex-wrap">
+        {[
+          { label: 'Good', color: '#22c55e', range: '≤50' },
+          { label: 'Moderate', color: '#eab308', range: '51–100' },
+          { label: 'Unhealthy', color: '#f97316', range: '101–150' },
+          { label: 'Bad', color: '#ef4444', range: '151+' },
+        ].map(l => (
+          <span key={l.label} className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+            <span className="inline-block w-2 h-2 rounded-sm" style={{ background: l.color }} />
+            {l.label} ({l.range})
+          </span>
+        ))}
+      </div>
     </div>
   )
 }

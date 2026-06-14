@@ -239,3 +239,27 @@ export interface CityRanking {
 
 export const getCityRanking = (days = 7) =>
   api.get<CityRanking[]>('/api/analytics/city-ranking', { params: { days } }).then(r => r.data)
+
+export interface DayOfWeekPattern {
+  day_of_week: number
+  day_label: string
+  avg_aqi: number
+  min_aqi: number
+  max_aqi: number
+  reading_count: number
+}
+
+export interface MonthlyPattern {
+  month: number
+  month_label: string
+  avg_aqi: number
+  min_aqi: number
+  max_aqi: number
+  reading_count: number
+}
+
+export const getDayOfWeekPattern = (city: string) =>
+  api.get<DayOfWeekPattern[]>('/api/analytics/day-of-week', { params: { city } }).then(r => r.data)
+
+export const getMonthlyPattern = (city: string) =>
+  api.get<MonthlyPattern[]>('/api/analytics/monthly-pattern', { params: { city } }).then(r => r.data)
