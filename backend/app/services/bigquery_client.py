@@ -61,6 +61,14 @@ def _predictions_table_id() -> str:
     return f"{settings.bigquery_project_id}.{settings.bigquery_dataset_id}.aqi_predictions"
 
 
+def _mv_daily_id() -> str:
+    return f"{settings.bigquery_project_id}.{settings.bigquery_dataset_id}.mv_daily_aqi_summary"
+
+
+def _mv_hourly_id() -> str:
+    return f"{settings.bigquery_project_id}.{settings.bigquery_dataset_id}.mv_hourly_aqi_summary"
+
+
 def _get_client() -> bigquery.Client:
     global _client
     if _client is None:
@@ -120,6 +128,58 @@ def _ensure_sync() -> None:
         pred_table.clustering_fields = ["location_id"]
         client.create_table(pred_table, exists_ok=True)
         logger.info("Created BigQuery table %s (partitioned by forecast_for, clustered by location_id).", _predictions_table_id())
+
+    _ensure_mv_sync(client)
+
+
+def _ensure_mv_sync(client: bigquery.Client) -> None:
+    """Create materialized views if they do not exist."""
+    p = settings.bigquery_project_id
+    d = settings.bigquery_dataset_id
+
+    # Non-partitioned MVs (full refresh) support DATE()/AVG on partitioned base tables.
+    # Bare aggregations only — no ROUND/IF/CAST in SELECT (BQ incremental restriction).
+    # Rounding handled in Python. At dataset scale (<5k rows), no partitioning needed.
+    daily_sql = f"""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS `{p}.{d}.mv_daily_aqi_summary`
+        OPTIONS (enable_refresh = true, refresh_interval_minutes = 60)
+        AS
+        SELECT
+          location_id, city, country,
+          DATE(timestamp) AS date,
+          AVG(aqi)  AS avg_aqi,
+          MIN(aqi)  AS min_aqi,
+          MAX(aqi)  AS max_aqi,
+          COUNT(*)  AS reading_count,
+          AVG(pm25) AS avg_pm25,
+          AVG(pm10) AS avg_pm10,
+          AVG(co)   AS avg_co,
+          AVG(no2)  AS avg_no2,
+          AVG(so2)  AS avg_so2,
+          AVG(o3)   AS avg_o3
+        FROM `{p}.{d}.air_quality_readings`
+        GROUP BY location_id, city, country, DATE(timestamp)
+    """
+
+    hourly_sql = f"""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS `{p}.{d}.mv_hourly_aqi_summary`
+        OPTIONS (enable_refresh = true, refresh_interval_minutes = 60)
+        AS
+        SELECT
+          location_id,
+          EXTRACT(HOUR FROM timestamp) AS hour,
+          AVG(aqi)  AS avg_aqi,
+          COUNT(*)  AS reading_count
+        FROM `{p}.{d}.air_quality_readings`
+        GROUP BY location_id, EXTRACT(HOUR FROM timestamp)
+    """
+
+    for sql, name in [(daily_sql, "mv_daily_aqi_summary"), (hourly_sql, "mv_hourly_aqi_summary")]:
+        try:
+            client.query(sql).result()
+            logger.info("BigQuery materialized view ready: %s.%s.%s", p, d, name)
+        except Exception as exc:
+            logger.warning("Could not create materialized view %s: %s", name, exc)
 
 
 async def ensure_dataset_and_table() -> None:

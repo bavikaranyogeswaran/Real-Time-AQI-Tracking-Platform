@@ -106,17 +106,12 @@ async def get_data_gaps(
 
 async def _daily_averages_bq(location_id: str, days: int) -> list[dict]:
     cutoff = datetime.now(UTC) - timedelta(days=days)
-    table = bq._table_id()
+    mv = bq._mv_daily_id()
     sql = f"""
-        SELECT
-            DATE(timestamp) AS date,
-            ROUND(AVG(aqi), 1) AS avg_aqi,
-            MIN(aqi) AS min_aqi,
-            MAX(aqi) AS max_aqi
-        FROM `{table}`
+        SELECT date, avg_aqi, min_aqi, max_aqi
+        FROM `{mv}`
         WHERE location_id = @location_id
-          AND timestamp >= @cutoff
-        GROUP BY date
+          AND date >= DATE(@cutoff)
         ORDER BY date ASC
     """
     rows = await bq.run_query(
@@ -126,7 +121,7 @@ async def _daily_averages_bq(location_id: str, days: int) -> list[dict]:
     return [
         {
             "date": row["date"],
-            "avg_aqi": float(row["avg_aqi"]),
+            "avg_aqi": round(float(row["avg_aqi"]), 1),
             "min_aqi": int(row["min_aqi"]),
             "max_aqi": int(row["max_aqi"]),
         }
@@ -135,21 +130,20 @@ async def _daily_averages_bq(location_id: str, days: int) -> list[dict]:
 
 
 async def _hourly_averages_bq(location_id: str) -> list[dict]:
-    table = bq._table_id()
+    mv = bq._mv_hourly_id()
     sql = f"""
-        SELECT
-            EXTRACT(HOUR FROM timestamp) AS hour,
-            ROUND(AVG(aqi), 1) AS avg_aqi
-        FROM `{table}`
+        SELECT hour, avg_aqi
+        FROM `{mv}`
         WHERE location_id = @location_id
-        GROUP BY hour
         ORDER BY hour ASC
     """
     rows = await bq.run_query(sql, [bq.str_param("location_id", location_id)])
-    return [{"hour": int(row["hour"]), "avg_aqi": float(row["avg_aqi"])} for row in rows]
+    return [{"hour": int(row["hour"]), "avg_aqi": round(float(row["avg_aqi"]), 1)} for row in rows]
 
 
 async def _aqi_distribution_bq(location_id: str) -> list[dict]:
+    # Base table query with 90-day filter — IF/CASE not allowed in MV definitions.
+    cutoff = datetime.now(UTC) - timedelta(days=90)
     table = bq._table_id()
     sql = f"""
         SELECT
@@ -164,10 +158,14 @@ async def _aqi_distribution_bq(location_id: str) -> list[dict]:
             COUNT(*) AS count
         FROM `{table}`
         WHERE location_id = @location_id
+          AND timestamp >= @cutoff
         GROUP BY category
         ORDER BY count DESC
     """
-    rows = await bq.run_query(sql, [bq.str_param("location_id", location_id)])
+    rows = await bq.run_query(
+        sql,
+        [bq.str_param("location_id", location_id), bq.ts_param("cutoff", cutoff)],
+    )
     return [{"category": row["category"], "count": int(row["count"])} for row in rows]
 
 
@@ -307,30 +305,30 @@ async def _city_ranking_bq(days: int) -> list[dict]:
     now = datetime.now(UTC)
     start = now - timedelta(days=days)
     prev_start = now - timedelta(days=days * 2)
-    table = bq._table_id()
+    mv = bq._mv_daily_id()
     sql = f"""
         WITH current_period AS (
             SELECT city, country,
-                   ROUND(AVG(aqi), 1)                                          AS avg_aqi,
-                   MAX(aqi)                                                     AS max_aqi,
-                   COUNT(DISTINCT IF(aqi > 150, DATE(timestamp), NULL))        AS unhealthy_days
-            FROM `{table}`
-            WHERE timestamp >= @start AND timestamp < @end
+                   ROUND(AVG(avg_aqi), 1)               AS avg_aqi,
+                   MAX(max_aqi)                          AS max_aqi,
+                   SUM(IF(max_aqi > 150, 1, 0))         AS unhealthy_days
+            FROM `{mv}`
+            WHERE date >= DATE(@start) AND date < DATE(@end)
             GROUP BY city, country
         ),
         prev_period AS (
-            SELECT city, ROUND(AVG(aqi), 1) AS prev_avg_aqi
-            FROM `{table}`
-            WHERE timestamp >= @prev_start AND timestamp < @start
+            SELECT city, ROUND(AVG(avg_aqi), 1) AS prev_avg_aqi
+            FROM `{mv}`
+            WHERE date >= DATE(@prev_start) AND date < DATE(@start)
             GROUP BY city
         )
         SELECT
             c.city, c.country, c.avg_aqi, c.max_aqi, c.unhealthy_days,
             p.prev_avg_aqi,
             CASE
-                WHEN p.prev_avg_aqi IS NULL         THEN 'stable'
-                WHEN p.prev_avg_aqi - c.avg_aqi > 5 THEN 'improving'
-                WHEN c.avg_aqi - p.prev_avg_aqi > 5 THEN 'worsening'
+                WHEN p.prev_avg_aqi IS NULL          THEN 'stable'
+                WHEN p.prev_avg_aqi - c.avg_aqi > 5  THEN 'improving'
+                WHEN c.avg_aqi - p.prev_avg_aqi > 5  THEN 'worsening'
                 ELSE 'stable'
             END AS trend
         FROM current_period c
@@ -346,10 +344,10 @@ async def _city_ranking_bq(days: int) -> list[dict]:
         {
             "city": row["city"],
             "country": row["country"],
-            "avg_aqi": float(row["avg_aqi"]),
+            "avg_aqi": round(float(row["avg_aqi"]), 1),
             "max_aqi": int(row["max_aqi"]),
             "unhealthy_days": int(row["unhealthy_days"]),
-            "prev_avg_aqi": float(row["prev_avg_aqi"]) if row["prev_avg_aqi"] is not None else None,
+            "prev_avg_aqi": round(float(row["prev_avg_aqi"]), 1) if row["prev_avg_aqi"] is not None else None,
             "trend": row["trend"],
         }
         for row in rows
@@ -358,20 +356,12 @@ async def _city_ranking_bq(days: int) -> list[dict]:
 
 async def _pollutant_trends_bq(location_id: str, days: int) -> list[dict]:
     cutoff = datetime.now(UTC) - timedelta(days=days)
-    table = bq._table_id()
+    mv = bq._mv_daily_id()
     sql = f"""
-        SELECT
-            DATE(timestamp) AS date,
-            ROUND(AVG(pm25), 2) AS avg_pm25,
-            ROUND(AVG(pm10), 2) AS avg_pm10,
-            ROUND(AVG(co),   2) AS avg_co,
-            ROUND(AVG(no2),  2) AS avg_no2,
-            ROUND(AVG(so2),  2) AS avg_so2,
-            ROUND(AVG(o3),   2) AS avg_o3
-        FROM `{table}`
+        SELECT date, avg_pm25, avg_pm10, avg_co, avg_no2, avg_so2, avg_o3
+        FROM `{mv}`
         WHERE location_id = @location_id
-          AND timestamp >= @cutoff
-        GROUP BY date
+          AND date >= DATE(@cutoff)
         ORDER BY date ASC
     """
     rows = await bq.run_query(
@@ -381,12 +371,12 @@ async def _pollutant_trends_bq(location_id: str, days: int) -> list[dict]:
     return [
         {
             "date": row["date"],
-            "avg_pm25": float(row["avg_pm25"]) if row["avg_pm25"] is not None else None,
-            "avg_pm10": float(row["avg_pm10"]) if row["avg_pm10"] is not None else None,
-            "avg_co":   float(row["avg_co"])   if row["avg_co"]   is not None else None,
-            "avg_no2":  float(row["avg_no2"])  if row["avg_no2"]  is not None else None,
-            "avg_so2":  float(row["avg_so2"])  if row["avg_so2"]  is not None else None,
-            "avg_o3":   float(row["avg_o3"])   if row["avg_o3"]   is not None else None,
+            "avg_pm25": round(float(row["avg_pm25"]), 2) if row["avg_pm25"] is not None else None,
+            "avg_pm10": round(float(row["avg_pm10"]), 2) if row["avg_pm10"] is not None else None,
+            "avg_co":   round(float(row["avg_co"]),   2) if row["avg_co"]   is not None else None,
+            "avg_no2":  round(float(row["avg_no2"]),  2) if row["avg_no2"]  is not None else None,
+            "avg_so2":  round(float(row["avg_so2"]),  2) if row["avg_so2"]  is not None else None,
+            "avg_o3":   round(float(row["avg_o3"]),   2) if row["avg_o3"]   is not None else None,
         }
         for row in rows
     ]
@@ -446,6 +436,7 @@ async def _city_comparison_bq() -> list[dict]:
                 ROW_NUMBER() OVER (PARTITION BY location_id ORDER BY timestamp DESC) AS rn
             FROM `{table}`
             WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+              AND _PARTITIONDATE >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
         )
         WHERE rn = 1
         ORDER BY aqi DESC
