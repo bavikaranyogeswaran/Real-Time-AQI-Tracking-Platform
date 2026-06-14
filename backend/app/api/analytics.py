@@ -7,6 +7,7 @@ from app.models.location import Location
 from app.rate_limit import limiter
 from app.schemas.alert_performance_schema import AlertPerformanceOut
 from app.schemas.analytics_schema import CityComparisonOut, CityRankingOut, DominantPollutantOut, ForecastAccuracyOut, GapOut, PollutantTrendOut, TrendOut
+from app.services import bigquery_client as bq
 from app.services.analytics import (
     get_alert_performance,
     get_aqi_distribution,
@@ -25,6 +26,14 @@ router = APIRouter()
 _PERIOD_DAYS = {"daily": 1, "weekly": 7, "monthly": 30}
 
 
+def _require_bq() -> None:
+    if not bq.is_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Analytics requires BigQuery. Set BIGQUERY_PROJECT_ID to enable.",
+        )
+
+
 async def _get_location(session: AsyncSession, city: str) -> Location:
     result = await session.execute(select(Location).where(Location.city.ilike(city)))
     location = result.scalars().first()
@@ -38,15 +47,15 @@ async def _get_location(session: AsyncSession, city: str) -> Location:
 async def city_ranking(
     request: Request,
     days: int = Query(default=7, ge=1, le=90),
-    session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
 ):
-    return await get_city_ranking(session, days)
+    return await get_city_ranking(days)
 
 
 @router.get("/analytics/city-comparison", response_model=list[CityComparisonOut])
 @limiter.limit("30/minute")
-async def city_comparison(request: Request, session: AsyncSession = Depends(get_db)):
-    return await get_city_comparison(session)
+async def city_comparison(request: Request, _: None = Depends(_require_bq)):
+    return await get_city_comparison()
 
 
 @router.get("/analytics/trends", response_model=list[TrendOut])
@@ -56,6 +65,7 @@ async def trends(
     city: str = Query(...),
     period: str = Query(default="weekly"),
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
 ):
     if period not in _PERIOD_DAYS:
         raise HTTPException(
@@ -63,7 +73,7 @@ async def trends(
             detail=f"Invalid period '{period}'. Choose from: {', '.join(_PERIOD_DAYS)}",
         )
     location = await _get_location(session, city)
-    return await get_daily_averages(session, location.location_id, _PERIOD_DAYS[period])
+    return await get_daily_averages(location.location_id, _PERIOD_DAYS[period])
 
 
 @router.get("/analytics/peak-hours")
@@ -72,9 +82,10 @@ async def peak_hours(
     request: Request,
     city: str = Query(...),
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
 ):
     location = await _get_location(session, city)
-    return await get_hourly_averages(session, location.location_id)
+    return await get_hourly_averages(location.location_id)
 
 
 @router.get("/analytics/distribution")
@@ -83,9 +94,10 @@ async def aqi_distribution(
     request: Request,
     city: str = Query(...),
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
 ):
     location = await _get_location(session, city)
-    return await get_aqi_distribution(session, location.location_id)
+    return await get_aqi_distribution(location.location_id)
 
 
 @router.get("/analytics/forecast-accuracy", response_model=ForecastAccuracyOut)
@@ -95,9 +107,10 @@ async def forecast_accuracy_report(
     city: str = Query(...),
     days: int = Query(default=7, ge=1, le=30),
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
 ):
     location = await _get_location(session, city)
-    return await get_forecast_accuracy(session, location.location_id, days)
+    return await get_forecast_accuracy(location.location_id, days)
 
 
 @router.get("/analytics/alert-performance", response_model=AlertPerformanceOut)
@@ -117,6 +130,7 @@ async def pollutant_trends(
     city: str = Query(...),
     period: str = Query(default="weekly"),
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
 ):
     if period not in _PERIOD_DAYS:
         raise HTTPException(
@@ -124,7 +138,7 @@ async def pollutant_trends(
             detail=f"Invalid period '{period}'. Choose from: {', '.join(_PERIOD_DAYS)}",
         )
     location = await _get_location(session, city)
-    return await get_pollutant_trends(session, location.location_id, _PERIOD_DAYS[period])
+    return await get_pollutant_trends(location.location_id, _PERIOD_DAYS[period])
 
 
 @router.get("/analytics/dominant-pollutant", response_model=list[DominantPollutantOut])
@@ -134,9 +148,10 @@ async def dominant_pollutant(
     city: str = Query(...),
     days: int = Query(default=7, ge=1, le=90),
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(_require_bq),
 ):
     location = await _get_location(session, city)
-    return await get_dominant_pollutant(session, location.location_id, days)
+    return await get_dominant_pollutant(location.location_id, days)
 
 
 @router.get("/analytics/gaps", response_model=list[GapOut])

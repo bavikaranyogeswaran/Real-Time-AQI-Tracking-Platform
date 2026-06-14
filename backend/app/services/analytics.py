@@ -1,118 +1,49 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import case, cast, distinct, func, select
+from sqlalchemy import cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Date
 
 from app.models.air_quality import AirQualityReading
 from app.models.alert import Alert
 from app.models.location import Location
-from app.models.prediction import AQIPrediction
 from app.services import bigquery_client as bq
 from app.services.ingestion import get_aqi_category
 
 logger = logging.getLogger(__name__)
 
 
-async def get_daily_averages(session: AsyncSession, location_id: str, days: int) -> list[dict]:
-    if bq.is_enabled():
-        try:
-            result = await _daily_averages_bq(location_id, days)
-            if result:
-                return result
-            logger.warning("BigQuery daily-averages returned empty, falling back to PostgreSQL")
-        except Exception as exc:
-            logger.warning("BigQuery daily-averages failed, falling back to PostgreSQL: %s", exc)
-    return await _daily_averages_pg(session, location_id, days)
+async def get_daily_averages(location_id: str, days: int) -> list[dict]:
+    return await _daily_averages_bq(location_id, days)
 
 
-async def get_hourly_averages(session: AsyncSession, location_id: str) -> list[dict]:
-    if bq.is_enabled():
-        try:
-            result = await _hourly_averages_bq(location_id)
-            if result:
-                return result
-            logger.warning("BigQuery hourly-averages returned empty, falling back to PostgreSQL")
-        except Exception as exc:
-            logger.warning("BigQuery hourly-averages failed, falling back to PostgreSQL: %s", exc)
-    return await _hourly_averages_pg(session, location_id)
+async def get_hourly_averages(location_id: str) -> list[dict]:
+    return await _hourly_averages_bq(location_id)
 
 
-async def get_aqi_distribution(session: AsyncSession, location_id: str) -> list[dict]:
-    if bq.is_enabled():
-        try:
-            result = await _aqi_distribution_bq(location_id)
-            if result:
-                return result
-            logger.warning("BigQuery distribution returned empty, falling back to PostgreSQL")
-        except Exception as exc:
-            logger.warning("BigQuery distribution failed, falling back to PostgreSQL: %s", exc)
-    return await _aqi_distribution_pg(session, location_id)
+async def get_aqi_distribution(location_id: str) -> list[dict]:
+    return await _aqi_distribution_bq(location_id)
 
 
-async def get_city_comparison(session: AsyncSession) -> list[dict]:
-    if bq.is_enabled():
-        try:
-            result = await _city_comparison_bq()
-            if result:
-                return result
-            logger.warning("BigQuery city-comparison returned empty, falling back to PostgreSQL")
-        except Exception as exc:
-            logger.warning("BigQuery city-comparison failed, falling back to PostgreSQL: %s", exc)
-    return await _city_comparison_pg(session)
+async def get_city_comparison() -> list[dict]:
+    return await _city_comparison_bq()
 
 
-async def get_forecast_accuracy(
-    session: AsyncSession,
-    location_id: str,
-    days: int,
-) -> dict:
-    if bq.is_enabled():
-        try:
-            result = await _forecast_accuracy_bq(location_id, days)
-            if result["sample_count"] > 0:
-                return result
-            logger.warning("BigQuery forecast-accuracy returned no matches, falling back to PostgreSQL")
-        except Exception as exc:
-            logger.warning("BigQuery forecast-accuracy failed, falling back to PostgreSQL: %s", exc)
-    return await _forecast_accuracy_pg(session, location_id, days)
+async def get_forecast_accuracy(location_id: str, days: int) -> dict:
+    return await _forecast_accuracy_bq(location_id, days)
 
 
-async def get_city_ranking(session: AsyncSession, days: int) -> list[dict]:
-    if bq.is_enabled():
-        try:
-            result = await _city_ranking_bq(days)
-            if result:
-                return result
-            logger.warning("BigQuery city-ranking returned empty, falling back to PostgreSQL")
-        except Exception as exc:
-            logger.warning("BigQuery city-ranking failed, falling back to PostgreSQL: %s", exc)
-    return await _city_ranking_pg(session, days)
+async def get_city_ranking(days: int) -> list[dict]:
+    return await _city_ranking_bq(days)
 
 
-async def get_pollutant_trends(session: AsyncSession, location_id: str, days: int) -> list[dict]:
-    if bq.is_enabled():
-        try:
-            result = await _pollutant_trends_bq(location_id, days)
-            if result:
-                return result
-            logger.warning("BigQuery pollutant-trends returned empty, falling back to PostgreSQL")
-        except Exception as exc:
-            logger.warning("BigQuery pollutant-trends failed, falling back to PostgreSQL: %s", exc)
-    return await _pollutant_trends_pg(session, location_id, days)
+async def get_pollutant_trends(location_id: str, days: int) -> list[dict]:
+    return await _pollutant_trends_bq(location_id, days)
 
 
-async def get_dominant_pollutant(session: AsyncSession, location_id: str, days: int) -> list[dict]:
-    if bq.is_enabled():
-        try:
-            result = await _dominant_pollutant_bq(location_id, days)
-            if result:
-                return result
-            logger.warning("BigQuery dominant-pollutant returned empty, falling back to PostgreSQL")
-        except Exception as exc:
-            logger.warning("BigQuery dominant-pollutant failed, falling back to PostgreSQL: %s", exc)
-    return await _dominant_pollutant_pg(session, location_id, days)
+async def get_dominant_pollutant(location_id: str, days: int) -> list[dict]:
+    return await _dominant_pollutant_bq(location_id, days)
 
 
 async def get_data_gaps(
@@ -168,104 +99,6 @@ async def get_data_gaps(
         )
 
     return gaps
-
-
-# ── PostgreSQL implementations ────────────────────────────────────────────────
-
-
-async def _daily_averages_pg(session: AsyncSession, location_id: str, days: int) -> list[dict]:
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    date_col = cast(AirQualityReading.timestamp, Date).label("date")
-    result = await session.execute(
-        select(
-            date_col,
-            func.avg(AirQualityReading.aqi).label("avg_aqi"),
-            func.min(AirQualityReading.aqi).label("min_aqi"),
-            func.max(AirQualityReading.aqi).label("max_aqi"),
-        )
-        .where(
-            AirQualityReading.location_id == location_id,
-            AirQualityReading.timestamp >= cutoff,
-        )
-        .group_by(date_col)
-        .order_by(date_col.asc())
-    )
-    return [
-        {
-            "date": row.date,
-            "avg_aqi": round(float(row.avg_aqi), 1),
-            "min_aqi": row.min_aqi,
-            "max_aqi": row.max_aqi,
-        }
-        for row in result.all()
-    ]
-
-
-async def _hourly_averages_pg(session: AsyncSession, location_id: str) -> list[dict]:
-    hour_col = func.extract("hour", AirQualityReading.timestamp).label("hour")
-    result = await session.execute(
-        select(
-            hour_col,
-            func.avg(AirQualityReading.aqi).label("avg_aqi"),
-        )
-        .where(AirQualityReading.location_id == location_id)
-        .group_by(hour_col)
-        .order_by(hour_col.asc())
-    )
-    return [
-        {"hour": int(row.hour), "avg_aqi": round(float(row.avg_aqi), 1)} for row in result.all()
-    ]
-
-
-async def _aqi_distribution_pg(session: AsyncSession, location_id: str) -> list[dict]:
-    category_col = case(
-        (AirQualityReading.aqi <= 50, "Good"),
-        (AirQualityReading.aqi <= 100, "Moderate"),
-        (AirQualityReading.aqi <= 150, "Unhealthy for Sensitive Groups"),
-        (AirQualityReading.aqi <= 200, "Unhealthy"),
-        (AirQualityReading.aqi <= 300, "Very Unhealthy"),
-        else_="Hazardous",
-    ).label("category")
-    result = await session.execute(
-        select(category_col, func.count().label("count"))
-        .where(AirQualityReading.location_id == location_id)
-        .group_by(category_col)
-        .order_by(func.count().desc())
-    )
-    return [{"category": row.category, "count": row.count} for row in result.all()]
-
-
-async def _city_comparison_pg(session: AsyncSession) -> list[dict]:
-    latest_subq = (
-        select(
-            AirQualityReading.location_id,
-            func.max(AirQualityReading.timestamp).label("max_ts"),
-        )
-        .group_by(AirQualityReading.location_id)
-        .subquery()
-    )
-    result = await session.execute(
-        select(Location, AirQualityReading)
-        .join(AirQualityReading, AirQualityReading.location_id == Location.location_id)
-        .join(
-            latest_subq,
-            (latest_subq.c.location_id == AirQualityReading.location_id)
-            & (latest_subq.c.max_ts == AirQualityReading.timestamp),
-        )
-        .order_by(AirQualityReading.aqi.desc())
-    )
-    return [
-        {
-            "city": loc.city,
-            "country": loc.country,
-            "latitude": float(loc.latitude),
-            "longitude": float(loc.longitude),
-            "latest_aqi": reading.aqi,
-            "category": get_aqi_category(reading.aqi),
-            "timestamp": reading.timestamp,
-        }
-        for loc, reading in result.all()
-    ]
 
 
 # ── BigQuery implementations ──────────────────────────────────────────────────
@@ -404,63 +237,6 @@ async def get_alert_performance(session: AsyncSession, days: int) -> dict:
     }
 
 
-async def _forecast_accuracy_pg(session: AsyncSession, location_id: str, days: int) -> dict:
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    now = datetime.now(UTC)
-    tolerance = timedelta(minutes=30)
-
-    pred_result = await session.execute(
-        select(AQIPrediction)
-        .where(
-            AQIPrediction.location_id == location_id,
-            AQIPrediction.forecast_for >= cutoff,
-            AQIPrediction.forecast_for <= now,
-        )
-        .order_by(AQIPrediction.forecast_for.asc())
-    )
-    predictions = pred_result.scalars().all()
-
-    if not predictions:
-        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
-
-    actual_result = await session.execute(
-        select(AirQualityReading)
-        .where(
-            AirQualityReading.location_id == location_id,
-            AirQualityReading.timestamp >= cutoff - tolerance,
-            AirQualityReading.timestamp <= now + tolerance,
-        )
-        .order_by(AirQualityReading.timestamp.asc())
-    )
-    actuals = actual_result.scalars().all()
-
-    rows = []
-    for pred in predictions:
-        best = min(
-            (a for a in actuals if abs(a.timestamp - pred.forecast_for) <= tolerance),
-            key=lambda a: abs(a.timestamp - pred.forecast_for),
-            default=None,
-        )
-        if best is not None:
-            rows.append({
-                "forecast_for": pred.forecast_for,
-                "predicted_aqi": pred.predicted_aqi,
-                "actual_aqi": best.aqi,
-                "error": round(pred.predicted_aqi - best.aqi, 2),
-            })
-
-    if not rows:
-        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
-
-    errors = [r["error"] for r in rows]
-    return {
-        "rows": rows,
-        "mae": round(sum(abs(e) for e in errors) / len(errors), 2),
-        "rmse": round((sum(e ** 2 for e in errors) / len(errors)) ** 0.5, 2),
-        "sample_count": len(rows),
-    }
-
-
 async def _forecast_accuracy_bq(location_id: str, days: int) -> dict:
     cutoff = datetime.now(UTC) - timedelta(days=days)
     now = datetime.now(UTC)
@@ -527,77 +303,6 @@ async def _forecast_accuracy_bq(location_id: str, days: int) -> dict:
     }
 
 
-def _trend_label(curr: float, prev: float | None) -> str:
-    if prev is None:
-        return "stable"
-    diff = prev - curr
-    if diff > 5:
-        return "improving"
-    if diff < -5:
-        return "worsening"
-    return "stable"
-
-
-async def _city_ranking_pg(session: AsyncSession, days: int) -> list[dict]:
-    now = datetime.now(UTC)
-    start = now - timedelta(days=days)
-    prev_start = now - timedelta(days=days * 2)
-
-    curr = (
-        select(
-            AirQualityReading.location_id,
-            func.avg(AirQualityReading.aqi).label("avg_aqi"),
-            func.max(AirQualityReading.aqi).label("max_aqi"),
-            func.count(distinct(
-                case(
-                    (AirQualityReading.aqi > 150, cast(AirQualityReading.timestamp, Date)),
-                    else_=None,
-                )
-            )).label("unhealthy_days"),
-        )
-        .where(AirQualityReading.timestamp >= start, AirQualityReading.timestamp < now)
-        .group_by(AirQualityReading.location_id)
-        .subquery()
-    )
-
-    prev = (
-        select(
-            AirQualityReading.location_id,
-            func.avg(AirQualityReading.aqi).label("prev_avg_aqi"),
-        )
-        .where(AirQualityReading.timestamp >= prev_start, AirQualityReading.timestamp < start)
-        .group_by(AirQualityReading.location_id)
-        .subquery()
-    )
-
-    result = await session.execute(
-        select(
-            Location.city,
-            Location.country,
-            curr.c.avg_aqi,
-            curr.c.max_aqi,
-            curr.c.unhealthy_days,
-            prev.c.prev_avg_aqi,
-        )
-        .join(curr, curr.c.location_id == Location.location_id)
-        .outerjoin(prev, prev.c.location_id == Location.location_id)
-        .order_by(curr.c.avg_aqi.desc())
-    )
-
-    return [
-        {
-            "city": row.city,
-            "country": row.country,
-            "avg_aqi": round(float(row.avg_aqi), 1),
-            "max_aqi": int(row.max_aqi),
-            "unhealthy_days": int(row.unhealthy_days),
-            "prev_avg_aqi": round(float(row.prev_avg_aqi), 1) if row.prev_avg_aqi is not None else None,
-            "trend": _trend_label(float(row.avg_aqi), float(row.prev_avg_aqi) if row.prev_avg_aqi is not None else None),
-        }
-        for row in result.all()
-    ]
-
-
 async def _city_ranking_bq(days: int) -> list[dict]:
     now = datetime.now(UTC)
     start = now - timedelta(days=days)
@@ -649,94 +354,6 @@ async def _city_ranking_bq(days: int) -> list[dict]:
         }
         for row in rows
     ]
-
-
-async def _pollutant_trends_pg(session: AsyncSession, location_id: str, days: int) -> list[dict]:
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    date_col = cast(AirQualityReading.timestamp, Date).label("date")
-    result = await session.execute(
-        select(
-            date_col,
-            func.avg(AirQualityReading.pm25).label("avg_pm25"),
-            func.avg(AirQualityReading.pm10).label("avg_pm10"),
-            func.avg(AirQualityReading.co).label("avg_co"),
-            func.avg(AirQualityReading.no2).label("avg_no2"),
-            func.avg(AirQualityReading.so2).label("avg_so2"),
-            func.avg(AirQualityReading.o3).label("avg_o3"),
-        )
-        .where(
-            AirQualityReading.location_id == location_id,
-            AirQualityReading.timestamp >= cutoff,
-        )
-        .group_by(date_col)
-        .order_by(date_col.asc())
-    )
-    return [
-        {
-            "date": row.date,
-            "avg_pm25": round(float(row.avg_pm25), 2) if row.avg_pm25 is not None else None,
-            "avg_pm10": round(float(row.avg_pm10), 2) if row.avg_pm10 is not None else None,
-            "avg_co": round(float(row.avg_co), 2) if row.avg_co is not None else None,
-            "avg_no2": round(float(row.avg_no2), 2) if row.avg_no2 is not None else None,
-            "avg_so2": round(float(row.avg_so2), 2) if row.avg_so2 is not None else None,
-            "avg_o3": round(float(row.avg_o3), 2) if row.avg_o3 is not None else None,
-        }
-        for row in result.all()
-    ]
-
-
-# WHO 24-hour guideline limits (μg/m³) used for exceedance counting
-_WHO_LIMITS: list[tuple[str, str, float]] = [
-    ("pm25", "PM2.5", 15.0),
-    ("pm10", "PM10",  45.0),
-    ("co",   "CO",    4000.0),
-    ("no2",  "NO₂",  25.0),
-    ("so2",  "SO₂",  40.0),
-    ("o3",   "O₃",   100.0),
-]
-
-
-async def _dominant_pollutant_pg(session: AsyncSession, location_id: str, days: int) -> list[dict]:
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    col = AirQualityReading
-    result = await session.execute(
-        select(
-            func.avg(col.pm25).label("avg_pm25"),
-            func.count().filter(col.pm25 > 15).label("exc_pm25"),
-            func.avg(col.pm10).label("avg_pm10"),
-            func.count().filter(col.pm10 > 45).label("exc_pm10"),
-            func.avg(col.co).label("avg_co"),
-            func.count().filter(col.co > 4000).label("exc_co"),
-            func.avg(col.no2).label("avg_no2"),
-            func.count().filter(col.no2 > 25).label("exc_no2"),
-            func.avg(col.so2).label("avg_so2"),
-            func.count().filter(col.so2 > 40).label("exc_so2"),
-            func.avg(col.o3).label("avg_o3"),
-            func.count().filter(col.o3 > 100).label("exc_o3"),
-        )
-        .where(col.location_id == location_id, col.timestamp >= cutoff)
-    )
-    row = result.one()
-    raw = [
-        ("pm25", float(row.avg_pm25 or 0), row.exc_pm25),
-        ("pm10", float(row.avg_pm10 or 0), row.exc_pm10),
-        ("co",   float(row.avg_co   or 0), row.exc_co),
-        ("no2",  float(row.avg_no2  or 0), row.exc_no2),
-        ("so2",  float(row.avg_so2  or 0), row.exc_so2),
-        ("o3",   float(row.avg_o3   or 0), row.exc_o3),
-    ]
-    limit_map = {key: (label, limit) for key, label, limit in _WHO_LIMITS}
-    data = [
-        {
-            "pollutant": key,
-            "label": limit_map[key][0],
-            "avg_value": round(avg, 2),
-            "safe_limit": limit_map[key][1],
-            "exceedance_count": exc,
-        }
-        for key, avg, exc in raw
-    ]
-    return sorted(data, key=lambda x: x["exceedance_count"], reverse=True)
 
 
 async def _pollutant_trends_bq(location_id: str, days: int) -> list[dict]:
