@@ -68,66 +68,15 @@ async def get_forecast_accuracy(
     location_id: str,
     days: int,
 ) -> dict:
-    """Compare past predictions against actual readings.
-
-    Predictions are matched to actuals within a ±30-minute tolerance window.
-    Only predictions whose forecast_for timestamp has already passed are included.
-    """
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    now = datetime.now(UTC)
-    tolerance = timedelta(minutes=30)
-
-    pred_result = await session.execute(
-        select(AQIPrediction)
-        .where(
-            AQIPrediction.location_id == location_id,
-            AQIPrediction.forecast_for >= cutoff,
-            AQIPrediction.forecast_for <= now,
-        )
-        .order_by(AQIPrediction.forecast_for.asc())
-    )
-    predictions = pred_result.scalars().all()
-
-    if not predictions:
-        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
-
-    actual_result = await session.execute(
-        select(AirQualityReading)
-        .where(
-            AirQualityReading.location_id == location_id,
-            AirQualityReading.timestamp >= cutoff - tolerance,
-            AirQualityReading.timestamp <= now + tolerance,
-        )
-        .order_by(AirQualityReading.timestamp.asc())
-    )
-    actuals = actual_result.scalars().all()
-
-    rows = []
-    for pred in predictions:
-        best = min(
-            (a for a in actuals if abs(a.timestamp - pred.forecast_for) <= tolerance),
-            key=lambda a: abs(a.timestamp - pred.forecast_for),
-            default=None,
-        )
-        if best is not None:
-            error = round(pred.predicted_aqi - float(best.aqi), 2)
-            rows.append(
-                {
-                    "forecast_for": pred.forecast_for,
-                    "predicted_aqi": pred.predicted_aqi,
-                    "actual_aqi": best.aqi,
-                    "error": error,
-                }
-            )
-
-    if not rows:
-        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
-
-    errors = [r["error"] for r in rows]
-    mae = round(sum(abs(e) for e in errors) / len(errors), 2)
-    rmse = round((sum(e ** 2 for e in errors) / len(errors)) ** 0.5, 2)
-
-    return {"rows": rows, "mae": mae, "rmse": rmse, "sample_count": len(rows)}
+    if bq.is_enabled():
+        try:
+            result = await _forecast_accuracy_bq(location_id, days)
+            if result["sample_count"] > 0:
+                return result
+            logger.warning("BigQuery forecast-accuracy returned no matches, falling back to PostgreSQL")
+        except Exception as exc:
+            logger.warning("BigQuery forecast-accuracy failed, falling back to PostgreSQL: %s", exc)
+    return await _forecast_accuracy_pg(session, location_id, days)
 
 
 async def get_city_ranking(session: AsyncSession, days: int) -> list[dict]:
@@ -452,6 +401,129 @@ async def get_alert_performance(session: AsyncSession, days: int) -> dict:
         "by_type": by_type,
         "by_city": by_city,
         "daily_counts": daily_counts,
+    }
+
+
+async def _forecast_accuracy_pg(session: AsyncSession, location_id: str, days: int) -> dict:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    now = datetime.now(UTC)
+    tolerance = timedelta(minutes=30)
+
+    pred_result = await session.execute(
+        select(AQIPrediction)
+        .where(
+            AQIPrediction.location_id == location_id,
+            AQIPrediction.forecast_for >= cutoff,
+            AQIPrediction.forecast_for <= now,
+        )
+        .order_by(AQIPrediction.forecast_for.asc())
+    )
+    predictions = pred_result.scalars().all()
+
+    if not predictions:
+        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
+
+    actual_result = await session.execute(
+        select(AirQualityReading)
+        .where(
+            AirQualityReading.location_id == location_id,
+            AirQualityReading.timestamp >= cutoff - tolerance,
+            AirQualityReading.timestamp <= now + tolerance,
+        )
+        .order_by(AirQualityReading.timestamp.asc())
+    )
+    actuals = actual_result.scalars().all()
+
+    rows = []
+    for pred in predictions:
+        best = min(
+            (a for a in actuals if abs(a.timestamp - pred.forecast_for) <= tolerance),
+            key=lambda a: abs(a.timestamp - pred.forecast_for),
+            default=None,
+        )
+        if best is not None:
+            rows.append({
+                "forecast_for": pred.forecast_for,
+                "predicted_aqi": pred.predicted_aqi,
+                "actual_aqi": best.aqi,
+                "error": round(pred.predicted_aqi - best.aqi, 2),
+            })
+
+    if not rows:
+        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
+
+    errors = [r["error"] for r in rows]
+    return {
+        "rows": rows,
+        "mae": round(sum(abs(e) for e in errors) / len(errors), 2),
+        "rmse": round((sum(e ** 2 for e in errors) / len(errors)) ** 0.5, 2),
+        "sample_count": len(rows),
+    }
+
+
+async def _forecast_accuracy_bq(location_id: str, days: int) -> dict:
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    now = datetime.now(UTC)
+    readings_table = bq._table_id()
+    predictions_table = bq._predictions_table_id()
+    sql = f"""
+        WITH predictions AS (
+            SELECT prediction_id, forecast_for, predicted_aqi
+            FROM `{predictions_table}`
+            WHERE location_id = @location_id
+              AND forecast_for >= @cutoff
+              AND forecast_for <= @now
+        ),
+        actuals AS (
+            SELECT timestamp, aqi
+            FROM `{readings_table}`
+            WHERE location_id = @location_id
+              AND timestamp >= TIMESTAMP_SUB(@cutoff, INTERVAL 30 MINUTE)
+              AND timestamp <= TIMESTAMP_ADD(@now, INTERVAL 30 MINUTE)
+        ),
+        matched AS (
+            SELECT
+                p.forecast_for,
+                p.predicted_aqi,
+                a.aqi AS actual_aqi,
+                ROUND(p.predicted_aqi - a.aqi, 2) AS error,
+                ROW_NUMBER() OVER (
+                    PARTITION BY p.prediction_id
+                    ORDER BY ABS(TIMESTAMP_DIFF(a.timestamp, p.forecast_for, MINUTE))
+                ) AS rn
+            FROM predictions p
+            JOIN actuals a
+              ON ABS(TIMESTAMP_DIFF(a.timestamp, p.forecast_for, MINUTE)) <= 30
+        )
+        SELECT forecast_for, predicted_aqi, actual_aqi, error
+        FROM matched
+        WHERE rn = 1
+        ORDER BY forecast_for ASC
+    """
+    rows = await bq.run_query(sql, [
+        bq.str_param("location_id", location_id),
+        bq.ts_param("cutoff", cutoff),
+        bq.ts_param("now", now),
+    ])
+
+    if not rows:
+        return {"rows": [], "mae": 0.0, "rmse": 0.0, "sample_count": 0}
+
+    result_rows = [
+        {
+            "forecast_for": row["forecast_for"],
+            "predicted_aqi": float(row["predicted_aqi"]),
+            "actual_aqi": int(row["actual_aqi"]),
+            "error": float(row["error"]),
+        }
+        for row in rows
+    ]
+    errors = [r["error"] for r in result_rows]
+    return {
+        "rows": result_rows,
+        "mae": round(sum(abs(e) for e in errors) / len(errors), 2),
+        "rmse": round((sum(e ** 2 for e in errors) / len(errors)) ** 0.5, 2),
+        "sample_count": len(result_rows),
     }
 
 

@@ -14,6 +14,17 @@ _client: bigquery.Client | None = None
 
 _BQ_SCOPES = ["https://www.googleapis.com/auth/bigquery"]
 
+BQ_PREDICTIONS_SCHEMA = [
+    bigquery.SchemaField("prediction_id",  "STRING",    mode="REQUIRED"),
+    bigquery.SchemaField("location_id",    "STRING",    mode="REQUIRED"),
+    bigquery.SchemaField("city",           "STRING"),
+    bigquery.SchemaField("country",        "STRING"),
+    bigquery.SchemaField("prediction_time","TIMESTAMP", mode="REQUIRED"),
+    bigquery.SchemaField("forecast_for",   "TIMESTAMP", mode="REQUIRED"),
+    bigquery.SchemaField("predicted_aqi",  "FLOAT",     mode="REQUIRED"),
+    bigquery.SchemaField("model_name",     "STRING"),
+]
+
 BQ_SCHEMA = [
     bigquery.SchemaField("reading_id", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("location_id", "STRING", mode="REQUIRED"),
@@ -42,6 +53,10 @@ def is_enabled() -> bool:
 
 def _table_id() -> str:
     return f"{settings.bigquery_project_id}.{settings.bigquery_dataset_id}.air_quality_readings"
+
+
+def _predictions_table_id() -> str:
+    return f"{settings.bigquery_project_id}.{settings.bigquery_dataset_id}.aqi_predictions"
 
 
 def _get_client() -> bigquery.Client:
@@ -89,6 +104,20 @@ def _ensure_sync() -> None:
         table.clustering_fields = ["location_id"]
         client.create_table(table, exists_ok=True)
         logger.info("Created BigQuery table %s (partitioned by day, clustered by location_id).", _table_id())
+
+    pred_ref = dataset_ref.table("aqi_predictions")
+    try:
+        client.get_table(pred_ref)
+        logger.info("BigQuery table %s already exists.", _predictions_table_id())
+    except Exception:
+        pred_table = bigquery.Table(pred_ref, schema=BQ_PREDICTIONS_SCHEMA)
+        pred_table.time_partitioning = bigquery.TimePartitioning(
+            type_=bigquery.TimePartitioningType.DAY,
+            field="forecast_for",
+        )
+        pred_table.clustering_fields = ["location_id"]
+        client.create_table(pred_table, exists_ok=True)
+        logger.info("Created BigQuery table %s (partitioned by forecast_for, clustered by location_id).", _predictions_table_id())
 
 
 async def ensure_dataset_and_table() -> None:
@@ -142,6 +171,24 @@ def _run_query_sync(sql: str, params: list) -> list[dict]:
 
 async def run_query(sql: str, params: list | None = None) -> list[dict]:
     return await asyncio.to_thread(_run_query_sync, sql, params or [])
+
+
+def _stream_predictions_sync(rows: list[dict]) -> None:
+    client = _get_client()
+    errors = client.insert_rows_json(_predictions_table_id(), rows)
+    if errors:
+        logger.error("BigQuery predictions streaming insert errors: %s", errors)
+
+
+async def stream_predictions_rows(rows: list[dict]) -> None:
+    """Stream a batch of prediction dicts to BigQuery. Never raises — errors are logged."""
+    if not is_enabled() or not rows:
+        return
+    try:
+        await asyncio.to_thread(_stream_predictions_sync, rows)
+        logger.debug("Streamed %d predictions to BigQuery.", len(rows))
+    except Exception as exc:
+        logger.error("Failed to stream predictions to BigQuery: %s", exc)
 
 
 def str_param(name: str, value: str) -> bigquery.ScalarQueryParameter:

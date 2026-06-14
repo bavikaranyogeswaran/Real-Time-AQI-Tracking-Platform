@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,7 @@ from app.ml.forecasting import predict_next_nh
 from app.models.air_quality import AirQualityReading
 from app.models.location import Location
 from app.models.prediction import AQIPrediction
+from app.services import bigquery_client as bq
 
 logger = logging.getLogger(__name__)
 
@@ -69,21 +71,39 @@ async def run_forecast_for_location(session: AsyncSession, location: Location) -
     )
 
     now = datetime.now(UTC)
+    new_preds: list[AQIPrediction] = []
     for p in predictions:
-        session.add(
-            AQIPrediction(
-                prediction_id=str(uuid.uuid4()),
-                location_id=location.location_id,
-                prediction_time=now,
-                forecast_for=p["forecast_for"],
-                predicted_aqi=p["predicted_aqi"],
-                model_name="xgboost",
-            )
+        pred = AQIPrediction(
+            prediction_id=str(uuid.uuid4()),
+            location_id=location.location_id,
+            prediction_time=now,
+            forecast_for=p["forecast_for"],
+            predicted_aqi=p["predicted_aqi"],
+            model_name="xgboost",
         )
+        session.add(pred)
+        new_preds.append(pred)
 
     await session.commit()
-    logger.info("Inserted %d forecast rows for %s.", len(predictions), location.city)
-    return len(predictions)
+    logger.info("Inserted %d forecast rows for %s.", len(new_preds), location.city)
+
+    if bq.is_enabled():
+        rows = [
+            {
+                "prediction_id": pred.prediction_id,
+                "location_id": pred.location_id,
+                "city": location.city,
+                "country": location.country,
+                "prediction_time": pred.prediction_time.isoformat(),
+                "forecast_for": pred.forecast_for.isoformat(),
+                "predicted_aqi": float(pred.predicted_aqi),
+                "model_name": pred.model_name,
+            }
+            for pred in new_preds
+        ]
+        asyncio.create_task(bq.stream_predictions_rows(rows))
+
+    return len(new_preds)
 
 
 def check_anomaly_for_reading(location_id: str, reading: AirQualityReading) -> bool:
