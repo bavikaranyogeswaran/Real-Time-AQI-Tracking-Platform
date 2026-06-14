@@ -6,6 +6,7 @@ import AdminDashboard from './pages/AdminDashboard'
 import AlertPerformance from './pages/AlertPerformance'
 import Alerts from './pages/Alerts'
 import CityDashboard from './pages/CityDashboard'
+import CityRanking from './pages/CityRanking'
 import Forecast from './pages/Forecast'
 import ForecastAccuracy from './pages/ForecastAccuracy'
 import Historical from './pages/Historical'
@@ -75,6 +76,7 @@ function AppShell() {
               <Route path="/accuracy" element={<ForecastAccuracy />} />
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/alert-performance" element={<AlertPerformance />} />
+              <Route path="/ranking" element={<CityRanking />} />
               <Route path="/admin" element={<AdminDashboard />} />
             </Routes>
           </div>

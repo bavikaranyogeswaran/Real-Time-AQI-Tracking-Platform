@@ -226,3 +226,16 @@ export const getPollutantTrends = (city: string, period = 'weekly') =>
 
 export const getDominantPollutant = (city: string, days = 7) =>
   api.get<DominantPollutant[]>('/api/analytics/dominant-pollutant', { params: { city, days } }).then(r => r.data)
+
+export interface CityRanking {
+  city: string
+  country: string
+  avg_aqi: number
+  max_aqi: number
+  unhealthy_days: number
+  prev_avg_aqi: number | null
+  trend: 'improving' | 'worsening' | 'stable'
+}
+
+export const getCityRanking = (days = 7) =>
+  api.get<CityRanking[]>('/api/analytics/city-ranking', { params: { days } }).then(r => r.data)

@@ -88,6 +88,15 @@ function TrendingUpIcon() {
   )
 }
 
+function AwardIcon() {
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="6"/>
+      <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/>
+    </svg>
+  )
+}
+
 function MoonIcon() {
   return (
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -103,6 +112,7 @@ export const NAV_LINKS = [
   { to: '/accuracy',   label: 'Accuracy',   end: false, icon: <TargetIcon /> },
   { to: '/alerts',            label: 'Alerts',      end: false, icon: <BellIcon /> },
   { to: '/alert-performance', label: 'Alert Stats',  end: false, icon: <TrendingUpIcon /> },
+  { to: '/ranking',           label: 'Ranking',      end: false, icon: <AwardIcon /> },
   { to: '/admin',             label: 'Admin',        end: false, icon: <ShieldIcon /> },
 ]
 

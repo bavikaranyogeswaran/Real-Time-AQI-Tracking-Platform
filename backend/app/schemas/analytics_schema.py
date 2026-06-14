@@ -70,3 +70,15 @@ class DominantPollutantOut(BaseModel):
     exceedance_count: int
 
     model_config = {"from_attributes": True}
+
+
+class CityRankingOut(BaseModel):
+    city: str
+    country: str
+    avg_aqi: float
+    max_aqi: int
+    unhealthy_days: int
+    prev_avg_aqi: float | None
+    trend: str  # "improving" | "worsening" | "stable"
+
+    model_config = {"from_attributes": True}

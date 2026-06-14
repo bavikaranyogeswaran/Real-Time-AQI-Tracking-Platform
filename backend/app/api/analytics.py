@@ -6,11 +6,12 @@ from app.database import get_db
 from app.models.location import Location
 from app.rate_limit import limiter
 from app.schemas.alert_performance_schema import AlertPerformanceOut
-from app.schemas.analytics_schema import CityComparisonOut, DominantPollutantOut, ForecastAccuracyOut, GapOut, PollutantTrendOut, TrendOut
+from app.schemas.analytics_schema import CityComparisonOut, CityRankingOut, DominantPollutantOut, ForecastAccuracyOut, GapOut, PollutantTrendOut, TrendOut
 from app.services.analytics import (
     get_alert_performance,
     get_aqi_distribution,
     get_city_comparison,
+    get_city_ranking,
     get_daily_averages,
     get_data_gaps,
     get_dominant_pollutant,
@@ -30,6 +31,16 @@ async def _get_location(session: AsyncSession, city: str) -> Location:
     if not location:
         raise HTTPException(status_code=404, detail=f"City '{city}' not found")
     return location
+
+
+@router.get("/analytics/city-ranking", response_model=list[CityRankingOut])
+@limiter.limit("30/minute")
+async def city_ranking(
+    request: Request,
+    days: int = Query(default=7, ge=1, le=90),
+    session: AsyncSession = Depends(get_db),
+):
+    return await get_city_ranking(session, days)
 
 
 @router.get("/analytics/city-comparison", response_model=list[CityComparisonOut])

@@ -1,7 +1,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import case, cast, func, select
+from sqlalchemy import case, cast, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Date
 
@@ -110,11 +110,11 @@ async def get_forecast_accuracy(
             default=None,
         )
         if best is not None:
-            error = round(float(pred.predicted_aqi) - float(best.aqi), 2)
+            error = round(pred.predicted_aqi - float(best.aqi), 2)
             rows.append(
                 {
                     "forecast_for": pred.forecast_for,
-                    "predicted_aqi": float(pred.predicted_aqi),
+                    "predicted_aqi": pred.predicted_aqi,
                     "actual_aqi": best.aqi,
                     "error": error,
                 }
@@ -128,6 +128,18 @@ async def get_forecast_accuracy(
     rmse = round((sum(e ** 2 for e in errors) / len(errors)) ** 0.5, 2)
 
     return {"rows": rows, "mae": mae, "rmse": rmse, "sample_count": len(rows)}
+
+
+async def get_city_ranking(session: AsyncSession, days: int) -> list[dict]:
+    if bq.is_enabled():
+        try:
+            result = await _city_ranking_bq(days)
+            if result:
+                return result
+            logger.warning("BigQuery city-ranking returned empty, falling back to PostgreSQL")
+        except Exception as exc:
+            logger.warning("BigQuery city-ranking failed, falling back to PostgreSQL: %s", exc)
+    return await _city_ranking_pg(session, days)
 
 
 async def get_pollutant_trends(session: AsyncSession, location_id: str, days: int) -> list[dict]:
@@ -441,6 +453,130 @@ async def get_alert_performance(session: AsyncSession, days: int) -> dict:
         "by_city": by_city,
         "daily_counts": daily_counts,
     }
+
+
+def _trend_label(curr: float, prev: float | None) -> str:
+    if prev is None:
+        return "stable"
+    diff = prev - curr
+    if diff > 5:
+        return "improving"
+    if diff < -5:
+        return "worsening"
+    return "stable"
+
+
+async def _city_ranking_pg(session: AsyncSession, days: int) -> list[dict]:
+    now = datetime.now(UTC)
+    start = now - timedelta(days=days)
+    prev_start = now - timedelta(days=days * 2)
+
+    curr = (
+        select(
+            AirQualityReading.location_id,
+            func.avg(AirQualityReading.aqi).label("avg_aqi"),
+            func.max(AirQualityReading.aqi).label("max_aqi"),
+            func.count(distinct(
+                case(
+                    (AirQualityReading.aqi > 150, cast(AirQualityReading.timestamp, Date)),
+                    else_=None,
+                )
+            )).label("unhealthy_days"),
+        )
+        .where(AirQualityReading.timestamp >= start, AirQualityReading.timestamp < now)
+        .group_by(AirQualityReading.location_id)
+        .subquery()
+    )
+
+    prev = (
+        select(
+            AirQualityReading.location_id,
+            func.avg(AirQualityReading.aqi).label("prev_avg_aqi"),
+        )
+        .where(AirQualityReading.timestamp >= prev_start, AirQualityReading.timestamp < start)
+        .group_by(AirQualityReading.location_id)
+        .subquery()
+    )
+
+    result = await session.execute(
+        select(
+            Location.city,
+            Location.country,
+            curr.c.avg_aqi,
+            curr.c.max_aqi,
+            curr.c.unhealthy_days,
+            prev.c.prev_avg_aqi,
+        )
+        .join(curr, curr.c.location_id == Location.location_id)
+        .outerjoin(prev, prev.c.location_id == Location.location_id)
+        .order_by(curr.c.avg_aqi.desc())
+    )
+
+    return [
+        {
+            "city": row.city,
+            "country": row.country,
+            "avg_aqi": round(float(row.avg_aqi), 1),
+            "max_aqi": int(row.max_aqi),
+            "unhealthy_days": int(row.unhealthy_days),
+            "prev_avg_aqi": round(float(row.prev_avg_aqi), 1) if row.prev_avg_aqi is not None else None,
+            "trend": _trend_label(float(row.avg_aqi), float(row.prev_avg_aqi) if row.prev_avg_aqi is not None else None),
+        }
+        for row in result.all()
+    ]
+
+
+async def _city_ranking_bq(days: int) -> list[dict]:
+    now = datetime.now(UTC)
+    start = now - timedelta(days=days)
+    prev_start = now - timedelta(days=days * 2)
+    table = bq._table_id()
+    sql = f"""
+        WITH current_period AS (
+            SELECT city, country,
+                   ROUND(AVG(aqi), 1)                                          AS avg_aqi,
+                   MAX(aqi)                                                     AS max_aqi,
+                   COUNT(DISTINCT IF(aqi > 150, DATE(timestamp), NULL))        AS unhealthy_days
+            FROM `{table}`
+            WHERE timestamp >= @start AND timestamp < @end
+            GROUP BY city, country
+        ),
+        prev_period AS (
+            SELECT city, ROUND(AVG(aqi), 1) AS prev_avg_aqi
+            FROM `{table}`
+            WHERE timestamp >= @prev_start AND timestamp < @start
+            GROUP BY city
+        )
+        SELECT
+            c.city, c.country, c.avg_aqi, c.max_aqi, c.unhealthy_days,
+            p.prev_avg_aqi,
+            CASE
+                WHEN p.prev_avg_aqi IS NULL         THEN 'stable'
+                WHEN p.prev_avg_aqi - c.avg_aqi > 5 THEN 'improving'
+                WHEN c.avg_aqi - p.prev_avg_aqi > 5 THEN 'worsening'
+                ELSE 'stable'
+            END AS trend
+        FROM current_period c
+        LEFT JOIN prev_period p ON c.city = p.city
+        ORDER BY c.avg_aqi DESC
+    """
+    rows = await bq.run_query(sql, [
+        bq.ts_param("start", start),
+        bq.ts_param("end", now),
+        bq.ts_param("prev_start", prev_start),
+    ])
+    return [
+        {
+            "city": row["city"],
+            "country": row["country"],
+            "avg_aqi": float(row["avg_aqi"]),
+            "max_aqi": int(row["max_aqi"]),
+            "unhealthy_days": int(row["unhealthy_days"]),
+            "prev_avg_aqi": float(row["prev_avg_aqi"]) if row["prev_avg_aqi"] is not None else None,
+            "trend": row["trend"],
+        }
+        for row in rows
+    ]
 
 
 async def _pollutant_trends_pg(session: AsyncSession, location_id: str, days: int) -> list[dict]:
