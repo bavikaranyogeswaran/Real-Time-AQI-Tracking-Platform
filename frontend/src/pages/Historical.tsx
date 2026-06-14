@@ -8,9 +8,10 @@ import {
 } from '../services/api'
 
 const PERIODS = [
-  { label: 'Daily',   value: 'daily' },
-  { label: 'Weekly',  value: 'weekly' },
-  { label: 'Monthly', value: 'monthly' },
+  { label: 'Daily',    value: 'daily' },
+  { label: 'Weekly',   value: 'weekly' },
+  { label: 'Monthly',  value: 'monthly' },
+  { label: 'Patterns', value: 'patterns' },
 ]
 
 export default function Historical() {
@@ -34,7 +35,7 @@ export default function Historical() {
   }, [])
 
   useEffect(() => {
-    if (!city) return
+    if (!city || period === 'patterns') return
     setLoading(true)
     const days = { daily: 1, weekly: 7, monthly: 30 }[period] ?? 7
     Promise.all([
@@ -108,7 +109,32 @@ export default function Historical() {
         </div>
       </div>
 
-      {loading ? (
+      {period === 'patterns' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {dowPattern.length > 0 ? (
+            <PatternBars
+              title={`Day-of-Week Pattern — ${city}`}
+              subtitle="All-time average AQI by weekday"
+              rows={dowPattern.map(r => ({ label: r.day_label.slice(0, 3), avg_aqi: r.avg_aqi, min_aqi: r.min_aqi, max_aqi: r.max_aqi }))}
+            />
+          ) : (
+            <div className="bg-[var(--surface-card)] rounded-xl border border-[var(--surface-border)] p-6 flex items-center justify-center text-sm text-[var(--text-muted)]">
+              No day-of-week data yet for {city}
+            </div>
+          )}
+          {monthlyPattern.length > 0 ? (
+            <PatternBars
+              title={`Seasonal Pattern — ${city}`}
+              subtitle="All-time average AQI by month"
+              rows={monthlyPattern.map(r => ({ label: r.month_label.slice(0, 3), avg_aqi: r.avg_aqi, min_aqi: r.min_aqi, max_aqi: r.max_aqi }))}
+            />
+          ) : (
+            <div className="bg-[var(--surface-card)] rounded-xl border border-[var(--surface-border)] p-6 flex items-center justify-center text-sm text-[var(--text-muted)]">
+              No monthly data yet for {city}
+            </div>
+          )}
+        </div>
+      ) : loading ? (
         <>
           <div className="grid grid-cols-3 gap-4">
             <StatSkeleton /><StatSkeleton /><StatSkeleton />
@@ -175,25 +201,6 @@ export default function Historical() {
                   )
                 })}
               </div>
-            </div>
-          )}
-
-          {(dowPattern.length > 0 || monthlyPattern.length > 0) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {dowPattern.length > 0 && (
-                <PatternBars
-                  title={`Day-of-Week Pattern — ${city}`}
-                  subtitle="All-time average AQI by weekday"
-                  rows={dowPattern.map(r => ({ label: r.day_label.slice(0, 3), avg_aqi: r.avg_aqi, min_aqi: r.min_aqi, max_aqi: r.max_aqi }))}
-                />
-              )}
-              {monthlyPattern.length > 0 && (
-                <PatternBars
-                  title={`Seasonal Pattern — ${city}`}
-                  subtitle="All-time average AQI by month"
-                  rows={monthlyPattern.map(r => ({ label: r.month_label.slice(0, 3), avg_aqi: r.avg_aqi, min_aqi: r.min_aqi, max_aqi: r.max_aqi }))}
-                />
-              )}
             </div>
           )}
         </>

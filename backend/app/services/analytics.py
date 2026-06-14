@@ -455,7 +455,7 @@ async def _day_of_week_pattern_bq(location_id: str) -> list[dict]:
         ORDER BY bq_dow ASC
     """
     rows = await bq.run_query(sql, [bq.str_param("location_id", location_id)])
-    return [
+    results = [
         {
             # BQ: 1=Sun, 2=Mon, ..., 7=Sat → remap to 0=Mon ... 6=Sun
             "day_of_week": (int(row["bq_dow"]) + 5) % 7,
@@ -467,6 +467,7 @@ async def _day_of_week_pattern_bq(location_id: str) -> list[dict]:
         }
         for row in rows
     ]
+    return sorted(results, key=lambda r: r["day_of_week"])
 
 
 async def _monthly_pattern_bq(location_id: str) -> list[dict]:
