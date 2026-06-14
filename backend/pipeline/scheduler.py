@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models.location import Location
+from app.services import bigquery_client as bq
 from app.services.ingestion import ingest_location, ingest_location_openaq
 from app.services.ml_service import run_forecast_for_location
 
@@ -25,6 +26,7 @@ async def ingest_all_locations() -> None:
                 await ingest_location(session, location)
         except Exception as exc:
             logger.error("Unexpected error ingesting %s: %s", location.city, exc)
+    await bq.flush_readings()
 
 
 async def ingest_all_locations_openaq() -> None:
@@ -39,6 +41,7 @@ async def ingest_all_locations_openaq() -> None:
                 await ingest_location_openaq(session, location)
         except Exception as exc:
             logger.error("OpenAQ ingest failed for %s: %s", location.city, exc)
+    await bq.flush_readings()
 
 
 async def run_hourly_forecast() -> None:

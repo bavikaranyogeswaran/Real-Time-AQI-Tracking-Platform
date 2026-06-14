@@ -32,8 +32,8 @@ class GapOut(BaseModel):
 class CityComparisonOut(BaseModel):
     city: str
     country: str
-    latitude: float
-    longitude: float
+    latitude: float | None
+    longitude: float | None
     latest_aqi: int
     category: str
     timestamp: datetime

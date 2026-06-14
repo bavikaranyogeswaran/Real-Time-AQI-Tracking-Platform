@@ -417,6 +417,7 @@ async def _dominant_pollutant_bq(location_id: str, days: int) -> list[dict]:
             SELECT 'o3', 'O₃', ROUND(AVG(o3), 2), 100.0, COUNTIF(o3 > 100)
             FROM `{table}` WHERE location_id = @location_id AND timestamp >= @cutoff AND o3 IS NOT NULL
         )
+        WHERE avg_value IS NOT NULL
         ORDER BY exceedance_count DESC
     """
     rows = await bq.run_query(
@@ -444,6 +445,7 @@ async def _city_comparison_bq() -> list[dict]:
                 city, country, latitude, longitude, aqi, timestamp,
                 ROW_NUMBER() OVER (PARTITION BY location_id ORDER BY timestamp DESC) AS rn
             FROM `{table}`
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
         )
         WHERE rn = 1
         ORDER BY aqi DESC

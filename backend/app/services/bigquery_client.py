@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import logging
 from datetime import datetime
@@ -11,6 +12,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _client: bigquery.Client | None = None
+_readings_buffer: list[dict] = []
 
 _BQ_SCOPES = ["https://www.googleapis.com/auth/bigquery"]
 
@@ -124,18 +126,28 @@ async def ensure_dataset_and_table() -> None:
     await asyncio.to_thread(_ensure_sync)
 
 
-def _stream_row_sync(row: dict) -> None:
+def _load_batch_sync(rows: list[dict], table_id: str, schema: list) -> None:
+    """Batch-load rows via a BigQuery load job (free-tier compatible)."""
     client = _get_client()
-    errors = client.insert_rows_json(_table_id(), [row])
-    if errors:
-        logger.error("BigQuery streaming insert errors: %s", errors)
+    ndjson = "\n".join(json.dumps(r, default=str) for r in rows).encode("utf-8")
+    job_config = bigquery.LoadJobConfig(
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        schema=schema,
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+    )
+    job = client.load_table_from_file(io.BytesIO(ndjson), table_id, job_config=job_config)
+    job.result()
+    if job.errors:
+        logger.error("BigQuery batch load errors for %s: %s", table_id, job.errors)
+    else:
+        logger.info("BigQuery batch load: %d rows → %s", len(rows), table_id)
 
 
 async def stream_reading(reading, location) -> None:
-    """Stream one AirQualityReading to BigQuery. Never raises — errors are logged."""
+    """Buffer one reading. Call flush_readings() at end of ingestion cycle to commit."""
     if not is_enabled():
         return
-    row = {
+    _readings_buffer.append({
         "reading_id": str(reading.reading_id),
         "location_id": str(reading.location_id),
         "city": location.city,
@@ -154,12 +166,20 @@ async def stream_reading(reading, location) -> None:
         "humidity": float(reading.humidity) if reading.humidity is not None else None,
         "wind_speed": float(reading.wind_speed) if reading.wind_speed is not None else None,
         "data_source": reading.data_source,
-    }
+    })
+
+
+async def flush_readings() -> None:
+    """Batch-load all buffered readings to BigQuery. One job per cycle — free-tier safe."""
+    global _readings_buffer
+    if not is_enabled() or not _readings_buffer:
+        return
+    rows = _readings_buffer[:]
+    _readings_buffer = []
     try:
-        await asyncio.to_thread(_stream_row_sync, row)
-        logger.debug("Streamed reading %s to BigQuery.", reading.reading_id)
+        await asyncio.to_thread(_load_batch_sync, rows, _table_id(), BQ_SCHEMA)
     except Exception as exc:
-        logger.error("Failed to stream reading to BigQuery: %s", exc)
+        logger.error("BigQuery readings flush failed: %s", exc)
 
 
 def _run_query_sync(sql: str, params: list) -> list[dict]:
@@ -173,22 +193,14 @@ async def run_query(sql: str, params: list | None = None) -> list[dict]:
     return await asyncio.to_thread(_run_query_sync, sql, params or [])
 
 
-def _stream_predictions_sync(rows: list[dict]) -> None:
-    client = _get_client()
-    errors = client.insert_rows_json(_predictions_table_id(), rows)
-    if errors:
-        logger.error("BigQuery predictions streaming insert errors: %s", errors)
-
-
 async def stream_predictions_rows(rows: list[dict]) -> None:
-    """Stream a batch of prediction dicts to BigQuery. Never raises — errors are logged."""
+    """Batch-load prediction rows to BigQuery. Never raises — errors are logged."""
     if not is_enabled() or not rows:
         return
     try:
-        await asyncio.to_thread(_stream_predictions_sync, rows)
-        logger.debug("Streamed %d predictions to BigQuery.", len(rows))
+        await asyncio.to_thread(_load_batch_sync, rows, _predictions_table_id(), BQ_PREDICTIONS_SCHEMA)
     except Exception as exc:
-        logger.error("Failed to stream predictions to BigQuery: %s", exc)
+        logger.error("Failed to load predictions to BigQuery: %s", exc)
 
 
 def str_param(name: str, value: str) -> bigquery.ScalarQueryParameter:
